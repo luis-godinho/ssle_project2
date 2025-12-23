@@ -1,0 +1,142 @@
+<group name="local,syslog,sshd,spam_detection,">
+
+  <rule id="100100" level="15" frequency="1" timeframe="60">
+    <if_group>web,attack</if_group>
+    <match>() {</match>
+    <description>Shellshock attack attempt detected</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+  </rule>
+
+  <rule id="100101" level="12">
+    <if_sid>31100,31101,31102,31103,31104</if_sid>
+    <regex>\(\)\s*\{</regex>
+    <description>Possible Shellshock attack in User-Agent header</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+  </rule>
+
+  <rule id="100102" level="10">
+    <if_group>web,attack,attacks</if_group>
+    <list field="srcip" lookup="address_match_key">etc/lists/blacklist-alienvault</list>
+    <description>IP address found in AlienVault reputation database</description>
+    <mitre>
+      <id>T1071</id>
+    </mitre>
+  </rule>
+
+  <rule id="100200" level="10" frequency="50" timeframe="10">
+    <if_sid>31100,31101,31102,31103</if_sid>
+    <same_source_ip />
+    <description>Possible DDoS attack: High frequency requests from $(srcip)</description>
+    <mitre>
+      <id>T1498</id>
+    </mitre>
+  </rule>
+
+  <rule id="100201" level="8" frequency="20" timeframe="60">
+    <if_sid>31101</if_sid>
+    <match>503</match>
+    <description>Multiple 503 errors detected - possible DoS condition</description>
+    <mitre>
+      <id>T1499</id>
+    </mitre>
+  </rule>
+
+  <rule id="100202" level="9" frequency="30" timeframe="120">
+    <if_sid>31100</if_sid>
+    <match>POST</match>
+    <same_source_ip />
+    <description>Possible Slow HTTP attack from $(srcip)</description>
+    <mitre>
+      <id>T1499.003</id>
+    </mitre>
+  </rule>
+
+  <rule id="100203" level="12">
+    <match>SYN flood</match>
+    <description>SYN flood attack detected</description>
+    <mitre>
+      <id>T1498.001</id>
+    </mitre>
+  </rule>
+
+  <rule id="100301" level="10">
+    <match>nigerian prince|inheritance|beneficiary</match>
+    <description>Possible Scam: Suspicious keywords in Subject/Log</description>
+    <group>scam_detection,nigerian,</group>
+  </rule>
+
+  <rule id="100302" level="10">
+    <regex>won.*lottery|winner.*prize|10000th.*visitor</regex>
+    <description>Possible Scam: Lottery keywords in Subject/Log</description>
+    <group>scam_detection,lottery,</group>
+  </rule>
+
+  <rule id="100303" level="9" frequency="15" timeframe="60">
+    <if_sid>100300</if_sid>
+    <if_matched_sid>100300</if_matched_sid>
+    <description>Bulk Spam: Multiple spam emails detected in 60s</description>
+    <group>spam_detection,bulk,</group>
+  </rule>
+
+  <rule id="100305" level="4">
+    <match>authentication failed</match>
+    <description>SMTP authentication failure detected</description>
+    <group>spam_detection,auth_fail,</group>
+  </rule>
+
+  <rule id="100306" level="10" frequency="5" timeframe="120">
+    <if_sid>100305</if_sid>
+    <if_matched_sid>100305</if_matched_sid>
+    <same_source_ip />
+    <description>SMTP Brute Force: Multiple auth failures from same IP</description>
+    <group>spam_detection,auth_fail,brute_force,</group>
+  </rule>
+
+  <rule id="100309" level="7">
+    <program_name>postfix/smtpd</program_name>
+    <match>Relay access denied</match>
+    <description>Spam Relay Attempt: Relay access denied</description>
+    <group>spam_detection,relay,</group>
+  </rule>
+
+  <rule id="100400" level="10" frequency="8" timeframe="180">
+    <if_sid>5503,5504,5551</if_sid>
+    <same_source_ip />
+    <description>Possible brute force attack from $(srcip)</description>
+    <mitre>
+      <id>T1110</id>
+    </mitre>
+  </rule>
+
+  <rule id="100401" level="8" frequency="15" timeframe="30">
+    <match>Connection refused|Connection reset</match>
+    <same_source_ip />
+    <description>Possible port scan from $(srcip)</description>
+    <mitre>
+      <id>T1046</id>
+    </mitre>
+  </rule>
+
+  <rule id="100402" level="12">
+    <if_group>web,attack</if_group>
+    <match>union.*select|' or '|1=1|sleep\(</match>
+    <description>Possible SQL injection attempt detected</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+  </rule>
+
+  <rule id="100403" level="10">
+    <if_group>web,attack</if_group>
+    <match>&lt;script&gt;|javascript:|onerror=</match>
+    <description>Possible XSS attack attempt detected</description>
+    <mitre>
+      <id>T1189</id>
+    </mitre>
+  </rule>
+
+</group>

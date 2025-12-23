@@ -1,0 +1,12 @@
+<decoder name="spamd-custom">
+  <program_name>^spamd</program_name>
+  <prematch>spamd: result: </prematch>
+  <regex offset="after_prematch">^(\w)\s+(\d+)\s+-</regex>
+  <order>spam_result,spam_score</order>
+</decoder>
+
+<decoder name="api-gateway-ddos">
+  <prematch>WAZUH_DDOS_ALERT</prematch>
+  <regex offset="after_prematch">src_ip=(\S+)</regex>
+  <order>srcip</order>
+</decoder>

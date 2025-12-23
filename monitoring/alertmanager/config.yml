@@ -1,0 +1,36 @@
+global:
+  resolve_timeout: 5m
+  slack_api_url: ''
+
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'default-receiver'
+  routes:
+    - match:
+        severity: critical
+      receiver: 'critical-receiver'
+      continue: true
+    - match:
+        severity: warning
+      receiver: 'warning-receiver'
+      continue: true
+
+receivers:
+  - name: 'default-receiver'
+    # Add your notification configuration here (email, webhook, etc.)
+  
+  - name: 'critical-receiver'
+    # Critical alerts configuration
+  
+  - name: 'warning-receiver'
+    # Warning alerts configuration
+
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'dev', 'instance']

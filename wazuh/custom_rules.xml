@@ -1,0 +1,66 @@
+<group name="microservices, ">
+
+  <rule id="100001" level="12">
+    <if_sid>1002</if_sid>
+    <match>high_request_rate</match>
+    <description>DoS Attack Detected: High request rate from single source</description>
+    <group>dos_attack,</group>
+  </rule>
+
+  <rule id="100002" level="12">
+    <if_sid>1002</if_sid>
+    <match>connection_flood</match>
+    <description>DoS Attack Detected: Connection flood detected</description>
+    <group>dos_attack,</group>
+  </rule>
+
+  <!-- DoS detection from API Gateway log -->
+<rule id="100200" level="10">
+  <decoded_as>api-gateway-ddos</decoded_as>
+  <description>DoS attack detected by API gateway</description>
+  <group>attack,dos,</group>
+</rule>
+
+<rule id="100201" level="12" frequency="3" timeframe="60">
+  <if_matched_sid>100200</if_matched_sid>
+  <description>Repeated DoS attack attempts detected by API gateway</description>
+  <group>attack,dos,</group>
+</rule>
+
+</group>
+
+<group name="local,spam_detection,">
+
+<rule id="3501" level="0" overwrite="yes" noalert="1">
+  <description>SPAMD result message - redirected to custom rules</description>
+  <group>syslog,spamd,</group>
+  <options>no_log</options>
+</rule>
+
+  
+  <!-- Base rule for all spamd custom decoder logs -->
+<rule id="100299" level="0" noalert="1">
+    <decoded_as>spamd-custom</decoded_as>
+    <description>SpamAssassin result message</description>
+  </rule>
+
+  <rule id="100300" level="5">
+    <if_sid>100299</if_sid>
+    <field name="spam_result">^Y$</field>
+    <description>SpamAssassin: Email identified as spam (Tagged)</description>
+  </rule>
+
+  <rule id="100307" level="10">
+    <if_sid>100300</if_sid>
+    <field name="spam_score">^\d{2,}\.|^\d{2,}$</field>
+    <description>SpamAssassin: High Severity Spam Detected (Score 10+)</description>
+    <group>high_score,</group>
+  </rule>
+
+  <rule id="100308" level="3">
+    <if_sid>100299</if_sid>
+    <field name="spam_result">^N$</field>
+    <description>SpamAssassin: Email identified as ham (Clean)</description>
+  </rule>
+
+</group>

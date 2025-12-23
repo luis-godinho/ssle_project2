@@ -1,0 +1,57 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Vault credentials (SENSITIVE - NEVER COMMIT)
+.vault/
+.vault/*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Docker
+.dockerignore
+
+# Logs
+*.log
+logs/
+
+# Build artifacts
+build/
+dist/
+*.o
+*.a
+*.so
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS files
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Testing
+.coverage
+.pytest_cache/
+.tox/
+htmlcov/
+
+# Secrets and sensitive data
+*.key
+*.pem
+secrets/
+credentials.json
+token.txt
+
+.direnv/
+.envrc
