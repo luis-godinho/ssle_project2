@@ -1,0 +1,465 @@
+version: "3.8"
+
+services:
+  # ==================== SERVICE REGISTRY (MTD COORDINATOR) ====================
+  registry:
+    build: ./services/registry
+    container_name: service-registry
+    hostname: registry.ecommerce.local
+    ports:
+      - "5000:5000"
+    environment:
+      - MTD_ENABLED=true
+      - ROTATION_INTERVAL=300  # 5 minutes
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+  # ==================== ORDER SERVICE BFT CLUSTER ====================
+  
+  # Order Service Node 1 (Primary)
+  order-node-1:
+    build: ./services/order-service
+    container_name: order-node-1
+    hostname: order1.ecommerce.local
+    ports:
+      - "8002:8002"
+    environment:
+      - REGISTRY_URL=http://registry:5000
+      - SERVICE_NAME=order-service
+      - NODE_ID=order-node-1
+      - NODE_PORT=8002
+      - CLUSTER_NODES=order-node-1:8002,order-node-2:8012,order-node-3:8022
+      - QUORUM_SIZE=2
+      - BFT_ENABLED=true
+      - WAZUH_MANAGER=wazuh.manager
+      - VAULT_ADDR=http://vault:8200
+    depends_on:
+      - registry
+      - vault
+      - wazuh.manager
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+  # Order Service Node 2
+  order-node-2:
+    build: ./services/order-service
+    container_name: order-node-2
+    hostname: order2.ecommerce.local
+    ports:
+      - "8012:8012"
+    environment:
+      - REGISTRY_URL=http://registry:5000
+      - SERVICE_NAME=order-service
+      - NODE_ID=order-node-2
+      - NODE_PORT=8012
+      - CLUSTER_NODES=order-node-1:8002,order-node-2:8012,order-node-3:8022
+      - QUORUM_SIZE=2
+      - BFT_ENABLED=true
+      - WAZUH_MANAGER=wazuh.manager
+      - VAULT_ADDR=http://vault:8200
+    depends_on:
+      - registry
+      - vault
+      - wazuh.manager
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+  # Order Service Node 3
+  order-node-3:
+    build: ./services/order-service
+    container_name: order-node-3
+    hostname: order3.ecommerce.local
+    ports:
+      - "8022:8022"
+    environment:
+      - REGISTRY_URL=http://registry:5000
+      - SERVICE_NAME=order-service
+      - NODE_ID=order-node-3
+      - NODE_PORT=8022
+      - CLUSTER_NODES=order-node-1:8002,order-node-2:8012,order-node-3:8022
+      - QUORUM_SIZE=2
+      - BFT_ENABLED=true
+      - WAZUH_MANAGER=wazuh.manager
+      - VAULT_ADDR=http://vault:8200
+    depends_on:
+      - registry
+      - vault
+      - wazuh.manager
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+  # ==================== BACKEND SERVICES (MTD) ====================
+
+  # Product Service with MTD
+  product-service:
+    build: ./services/product-service
+    container_name: product-service
+    hostname: product.ecommerce.local
+    ports:
+      - "8001-8011:8001-8011"  # MTD port range
+    environment:
+      - REGISTRY_URL=http://registry:5000
+      - SERVICE_NAME=product-service
+      - MTD_ENABLED=true
+      - MTD_PORT_RANGE=8001-8011
+      - INITIAL_PORT=8001
+      - ROTATION_INTERVAL=300
+      - WAZUH_MANAGER=wazuh.manager
+      - VAULT_ADDR=http://vault:8200
+    depends_on:
+      - registry
+      - vault
+      - wazuh.manager
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+  # Payment Service with MTD
+  payment-service:
+    build: ./services/payment-service
+    container_name: payment-service
+    hostname: payment.ecommerce.local
+    ports:
+      - "8003-8013:8003-8013"  # MTD port range
+    environment:
+      - REGISTRY_URL=http://registry:5000
+      - SERVICE_NAME=payment-service
+      - MTD_ENABLED=true
+      - MTD_PORT_RANGE=8003-8013
+      - INITIAL_PORT=8003
+      - ROTATION_INTERVAL=300
+      - WAZUH_MANAGER=wazuh.manager
+      - VAULT_ADDR=http://vault:8200
+    depends_on:
+      - registry
+      - vault
+      - wazuh.manager
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+  # Email Service with MTD
+  email-service:
+    build: ./services/email-service
+    container_name: email-service
+    hostname: email.ecommerce.local
+    ports:
+      - "25:25"          # SMTP primary
+      - "2525-2534:2525-2534"  # MTD port range
+      - "143:143"        # IMAP
+    environment:
+      - REGISTRY_URL=http://registry:5000
+      - SERVICE_NAME=email-service
+      - MTD_ENABLED=true
+      - MTD_PORT_RANGE=2525-2534
+      - INITIAL_PORT=25
+      - ROTATION_INTERVAL=300
+      - WAZUH_MANAGER=wazuh.manager
+      - VAULT_ADDR=http://vault:8200
+    depends_on:
+      - registry
+      - vault
+      - wazuh.manager
+    volumes:
+      - email-data:/var/mail
+      - email-logs:/var/log
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+  # ==================== FRONTEND & GATEWAY ====================
+
+  # API Gateway with MTD and Load Balancing
+  api-gateway:
+    build: ./services/api-gateway
+    container_name: api-gateway
+    hostname: gateway.ecommerce.local
+    ports:
+      - "8080-8090:8080-8090"  # MTD port range
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - REGISTRY_URL=http://registry:5000
+      - SERVICE_NAME=api-gateway
+      - MTD_ENABLED=true
+      - MTD_PORT_RANGE=8080-8090
+      - INITIAL_PORT=8080
+      - ROTATION_INTERVAL=300
+      - RATE_LIMIT_REQUESTS=100
+      - RATE_LIMIT_WINDOW=60
+      - BFT_LOAD_BALANCE=true  # Round-robin to order cluster
+      - WAZUH_MANAGER=wazuh.manager
+      - VAULT_ADDR=http://vault:8200
+    depends_on:
+      - registry
+      - vault
+      - wazuh.manager
+      - order-node-1
+      - order-node-2
+      - order-node-3
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+  # Web Service
+  web-service:
+    build: ./services/web-service
+    container_name: web-service
+    hostname: web.ecommerce.local
+    ports:
+      - "80:80"
+    environment:
+      - REGISTRY_URL=http://registry:5000
+      - SERVICE_NAME=web-service
+      - API_GATEWAY_URL=http://api-gateway:8080
+      - WAZUH_MANAGER=wazuh.manager
+    depends_on:
+      - registry
+      - api-gateway
+      - wazuh.manager
+    volumes:
+      - web-logs:/var/log/apache2
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+  # ==================== SECURITY & SECRETS ====================
+
+  # HashiCorp Vault - Secret Management
+  vault:
+    image: hashicorp/vault:latest
+    container_name: vault
+    hostname: vault.ecommerce.local
+    ports:
+      - "8200:8200"
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=root
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - vault-data:/vault/file
+      - ./vault/config.hcl:/vault/config/config.hcl
+      - ./vault/policies:/vault/policies
+    command: server -dev
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+  # Wazuh Manager
+  wazuh.manager:
+    image: wazuh/wazuh-manager:4.14.1
+    hostname: wazuh.manager
+    container_name: wazuh-manager
+    restart: always
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 655360
+        hard: 655360
+    ports:
+      - "1514:1514"
+      - "1515:1515"
+      - "514:514/udp"
+      - "55000:55000"
+    environment:
+      - INDEXER_URL=https://wazuh.indexer:9200
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - FILEBEAT_SSL_VERIFICATION_MODE=full
+      - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/root-ca.pem
+      - SSL_CERTIFICATE=/etc/ssl/filebeat.pem
+      - SSL_KEY=/etc/ssl/filebeat.key
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=MyS3cr37P450r.*-
+    volumes:
+      - wazuh_api_configuration:/var/ossec/api/configuration
+      - wazuh_etc:/var/ossec/etc
+      - wazuh_logs:/var/ossec/logs
+      - wazuh_queue:/var/ossec/queue
+      - wazuh_var_multigroups:/var/ossec/var/multigroups
+      - wazuh_integrations:/var/ossec/integrations
+      - wazuh_active_response:/var/ossec/active-response/bin
+      - wazuh_agentless:/var/ossec/agentless
+      - wazuh_wodles:/var/ossec/wodles
+      - filebeat_etc:/etc/filebeat
+      - filebeat_var:/var/lib/filebeat
+      - ./wazuh/config/wazuh_indexer_ssl_certs/root-ca-manager.pem:/etc/ssl/root-ca.pem
+      - ./wazuh/config/wazuh_indexer_ssl_certs/wazuh.manager.pem:/etc/ssl/filebeat.pem
+      - ./wazuh/config/wazuh_indexer_ssl_certs/wazuh.manager-key.pem:/etc/ssl/filebeat.key
+      - ./wazuh/config/wazuh_cluster/wazuh_manager.conf:/wazuh-config-mount/etc/ossec.conf
+      - ./wazuh/custom_rules.xml:/var/ossec/etc/rules/local_rules.xml
+      - ./wazuh/config/custom_decoder.xml:/var/ossec/etc/decoders/custom_decoder.xml
+    networks:
+      - ecommerce-network
+
+  # Wazuh Indexer
+  wazuh.indexer:
+    image: wazuh/wazuh-indexer:4.14.1
+    hostname: wazuh.indexer
+    container_name: wazuh-indexer
+    restart: always
+    ports:
+      - "9200:9200"
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - wazuh-indexer-data:/var/lib/wazuh-indexer
+      - ./wazuh/config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-indexer/config/certs/root-ca.pem
+      - ./wazuh/config/wazuh_indexer_ssl_certs/wazuh.indexer-key.pem:/usr/share/wazuh-indexer/config/certs/wazuh.indexer.key
+      - ./wazuh/config/wazuh_indexer_ssl_certs/wazuh.indexer.pem:/usr/share/wazuh-indexer/config/certs/wazuh.indexer.pem
+      - ./wazuh/config/wazuh_indexer_ssl_certs/admin.pem:/usr/share/wazuh-indexer/config/certs/admin.pem
+      - ./wazuh/config/wazuh_indexer_ssl_certs/admin-key.pem:/usr/share/wazuh-indexer/config/certs/admin-key.pem
+      - ./wazuh/config/wazuh_indexer/wazuh.indexer.yml:/usr/share/wazuh-indexer/config/opensearch.yml
+      - ./wazuh/config/wazuh_indexer/internal_users.yml:/usr/share/wazuh-indexer/config/opensearch-security/internal_users.yml
+    networks:
+      - ecommerce-network
+
+  # Wazuh Dashboard
+  wazuh.dashboard:
+    image: wazuh/wazuh-dashboard:4.14.1
+    hostname: wazuh.dashboard
+    container_name: wazuh-dashboard
+    restart: always
+    ports:
+      - "443:5601"
+    environment:
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=SecretPassword
+      - WAZUH_API_URL=https://wazuh.manager
+      - DASHBOARD_USERNAME=kibanaserver
+      - DASHBOARD_PASSWORD=kibanaserver
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=MyS3cr37P450r.*-
+    volumes:
+      - ./wazuh/config/wazuh_indexer_ssl_certs/wazuh.dashboard.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard.pem
+      - ./wazuh/config/wazuh_indexer_ssl_certs/wazuh.dashboard-key.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard-key.pem
+      - ./wazuh/config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-dashboard/certs/root-ca.pem
+      - ./wazuh/config/wazuh_dashboard/opensearch_dashboards.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml
+      - ./wazuh/config/wazuh_dashboard/wazuh.yml:/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
+      - wazuh-dashboard-config:/usr/share/wazuh-dashboard/data/wazuh/config
+      - wazuh-dashboard-custom:/usr/share/wazuh-dashboard/plugins/wazuh/public/assets/custom
+    depends_on:
+      - wazuh.indexer
+    links:
+      - wazuh.indexer:wazuh.indexer
+      - wazuh.manager:wazuh.manager
+    networks:
+      - ecommerce-network
+
+  # ==================== MONITORING ====================
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    hostname: prometheus.ecommerce.local
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: grafana
+    hostname: grafana.ecommerce.local
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - ecommerce-network
+
+  # Alertmanager
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    hostname: alertmanager.ecommerce.local
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager/config.yml:/etc/alertmanager/config.yml
+      - alertmanager-data:/alertmanager
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+  # Node Exporter
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    hostname: node-exporter.ecommerce.local
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+    networks:
+      - ecommerce-network
+
+volumes:
+  vault-data:
+  web-logs:
+  email-data:
+  email-logs:
+  prometheus-data:
+  grafana-data:
+  alertmanager-data:
+  wazuh_api_configuration:
+  wazuh_etc:
+  wazuh_logs:
+  wazuh_queue:
+  wazuh_var_multigroups:
+  wazuh_integrations:
+  wazuh_active_response:
+  wazuh_agentless:
+  wazuh_wodles:
+  filebeat_etc:
+  filebeat_var:
+  wazuh-indexer-data:
+  wazuh-dashboard-config:
+  wazuh-dashboard-custom:
+
+networks:
+  ecommerce-network:
+    driver: bridge
