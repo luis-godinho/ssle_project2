@@ -9,6 +9,7 @@ Features:
 - Port rotation management
 - Service location tracking
 - Load balancing for BFT clusters (round-robin)
+- Deadlock-free rotation (lock released before response)
 """
 
 import json
@@ -61,7 +62,7 @@ registry_loadbalance_requests = Counter(
 
 
 def allocate_port(service_name, exclude_ports=None):
-    """Allocate a new port for a service from its range"""
+    """Allocate a new port for a service from its range (NO LOCK - caller must hold lock)"""
     if service_name not in PORT_RANGES:
         return None
 
@@ -69,12 +70,11 @@ def allocate_port(service_name, exclude_ports=None):
     exclude = exclude_ports or []
 
     # Get currently used ports for this service
-    with services_lock:
-        used_ports = [
-            s["port"]
-            for s in services.values()
-            if s.get("service_name") == service_name
-        ]
+    used_ports = [
+        s["port"]
+        for s in services.values()
+        if s.get("service_name") == service_name
+    ]
 
     exclude.extend(used_ports)
 
@@ -239,13 +239,21 @@ def services_status():
 
 @app.route("/rotate/<service_name>", methods=["POST"])
 def rotate(service_name):
-    """Trigger port rotation for a service"""
+    """
+    Trigger port rotation for a service.
+    
+    CRITICAL: Lock is released BEFORE returning response to avoid deadlock!
+    Service will immediately call /register with new port, which needs the lock.
+    """
+    # Allocate new port and update state INSIDE lock
     with services_lock:
         if service_name not in services:
             return jsonify({"error": f"Service {service_name} not found"}), 404
 
-        # Allocate new port
+        # Get current port
         current_port = services[service_name]["port"]
+        
+        # Allocate new port (allocate_port assumes lock is held)
         new_port = allocate_port(service_name, exclude_ports=[current_port])
 
         if not new_port:
@@ -253,21 +261,29 @@ def rotate(service_name):
 
         # Increment rotation count
         services[service_name]["rotation_count"] += 1
-        registry_rotations_total.labels(service=service_name).inc()
-
+        rotation_count = services[service_name]["rotation_count"]
+        
+        # Log inside lock
         logger.info(
             f"Rotation requested for {service_name}: {current_port} -> {new_port}"
         )
-
-        return jsonify(
-            {
-                "service": service_name,
-                "old_port": current_port,
-                "new_port": new_port,
-                "rotation_time": datetime.now().isoformat(),
-                "rotation_count": services[service_name]["rotation_count"],
-            }
-        ), 200
+        
+        # Prepare response data
+        response_data = {
+            "service": service_name,
+            "old_port": current_port,
+            "new_port": new_port,
+            "rotation_time": datetime.now().isoformat(),
+            "rotation_count": rotation_count,
+        }
+        
+        # Update metrics
+        registry_rotations_total.labels(service=service_name).inc()
+    
+    # LOCK IS NOW RELEASED!
+    # Service can now call /register with new port without deadlock
+    
+    return jsonify(response_data), 200
 
 
 @app.route("/heartbeat/<service_name>", methods=["POST"])
@@ -326,6 +342,7 @@ if __name__ == "__main__":
     logger.info("Service Registry starting...")
     logger.info(f"Port ranges configured: {PORT_RANGES}")
     logger.info("Load balancing enabled for BFT clusters")
+    logger.info("Deadlock-free rotation enabled")
 
     # Start health checker thread
     health_thread = Thread(target=health_checker, daemon=True)
