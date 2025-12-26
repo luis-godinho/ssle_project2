@@ -154,14 +154,11 @@ services:
     hostname: email.ecommerce.local
     ports:
       - "25:25" # SMTP primary
-      - "2525-2534:2525-2534" # MTD port range
       - "143:143" # IMAP
     environment:
       - REGISTRY_URL=http://registry:5000
       - SERVICE_NAME=email-service
-      - MTD_ENABLED=true
-      - MTD_PORT_RANGE=2525-2534
-      - INITIAL_PORT=25
+      - SERVICE_PORT=25
       - ROTATION_INTERVAL=300
       - WAZUH_MANAGER=wazuh.manager
       - VAULT_ADDR=http://vault:8200
