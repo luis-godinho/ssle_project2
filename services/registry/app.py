@@ -71,9 +71,7 @@ def allocate_port(service_name, exclude_ports=None):
 
     # Get currently used ports for this service
     used_ports = [
-        s["port"]
-        for s in services.values()
-        if s.get("service_name") == service_name
+        s["port"] for s in services.values() if s.get("service_name") == service_name
     ]
 
     exclude.extend(used_ports)
@@ -118,8 +116,10 @@ def register():
 
     logger.info(f"Registered service: {service_name} at {host}:{port}")
     if metadata.get("type") == "bft-cluster-member":
-        logger.info(f"  BFT cluster member: {metadata.get('node_id')} (role: {metadata.get('node_role')})")
-    
+        logger.info(
+            f"  BFT cluster member: {metadata.get('node_id')} (role: {metadata.get('node_role')})"
+        )
+
     return jsonify({"status": "registered", "service": service_name, "port": port}), 200
 
 
@@ -129,45 +129,50 @@ def discover(service_name):
     with services_lock:
         # Check if this is a BFT cluster (multiple nodes registered)
         cluster_members = [
-            name for name in services.keys()
-            if name.startswith(f"{service_name}-") and services[name].get("metadata", {}).get("type") == "bft-cluster-member"
+            name
+            for name in services.keys()
+            if name.startswith(f"{service_name}-")
+            and services[name].get("metadata", {}).get("type") == "bft-cluster-member"
         ]
-        
+
         if cluster_members:
             # BFT cluster detected - do load balancing
             healthy_members = [
-                name for name in cluster_members
-                if services[name]["healthy"]
+                name for name in cluster_members if services[name]["healthy"]
             ]
-            
+
             if not healthy_members:
-                return jsonify({"error": f"No healthy nodes in {service_name} cluster"}), 503
-            
+                return jsonify(
+                    {"error": f"No healthy nodes in {service_name} cluster"}
+                ), 503
+
             # Round-robin load balancing
             with load_balancer_lock:
                 if service_name not in load_balancer_index:
                     load_balancer_index[service_name] = 0
-                
+
                 index = load_balancer_index[service_name] % len(healthy_members)
                 selected_node = healthy_members[index]
                 load_balancer_index[service_name] = (index + 1) % len(healthy_members)
-            
+
             service = services[selected_node]
             registry_loadbalance_requests.labels(service=service_name).inc()
-            
+
             logger.debug(f"Load-balanced {service_name} -> {selected_node}")
-            
-            return jsonify({
-                "name": service_name,
-                "url": service["url"],
-                "port": service["port"],
-                "host": service["host"],
-                "load_balanced": True,
-                "selected_node": selected_node,
-                "healthy_nodes": len(healthy_members),
-                "total_nodes": len(cluster_members),
-            }), 200
-        
+
+            return jsonify(
+                {
+                    "name": service_name,
+                    "url": service["url"],
+                    "port": service["port"],
+                    "host": service["host"],
+                    "load_balanced": True,
+                    "selected_node": selected_node,
+                    "healthy_nodes": len(healthy_members),
+                    "total_nodes": len(cluster_members),
+                }
+            ), 200
+
         # Single service (not a cluster)
         if service_name not in services:
             return jsonify({"error": f"Service {service_name} not found"}), 404
@@ -241,9 +246,7 @@ def services_status():
 def rotate(service_name):
     """
     Trigger port rotation for a service.
-    
-    CRITICAL: Lock is released BEFORE returning response to avoid deadlock!
-    Service will immediately call /register with new port, which needs the lock.
+    Now actively triggers the service to rotate via its /rotate endpoint.
     """
     # Allocate new port and update state INSIDE lock
     with services_lock:
@@ -252,7 +255,7 @@ def rotate(service_name):
 
         # Get current port
         current_port = services[service_name]["port"]
-        
+
         # Allocate new port (allocate_port assumes lock is held)
         new_port = allocate_port(service_name, exclude_ports=[current_port])
 
@@ -262,12 +265,15 @@ def rotate(service_name):
         # Increment rotation count
         services[service_name]["rotation_count"] += 1
         rotation_count = services[service_name]["rotation_count"]
-        
+
+        # Get service URL
+        service_url = services[service_name]["url"]
+
         # Log inside lock
         logger.info(
             f"Rotation requested for {service_name}: {current_port} -> {new_port}"
         )
-        
+
         # Prepare response data
         response_data = {
             "service": service_name,
@@ -276,13 +282,43 @@ def rotate(service_name):
             "rotation_time": datetime.now().isoformat(),
             "rotation_count": rotation_count,
         }
-        
+
         # Update metrics
         registry_rotations_total.labels(service=service_name).inc()
-    
+
     # LOCK IS NOW RELEASED!
-    # Service can now call /register with new port without deadlock
-    
+
+    # Try to trigger rotation on the service itself
+    try:
+        # Call service's /rotate endpoint
+        service_rotate_url = f"{service_url}/rotate"
+
+        logger.info(f"🔄 Triggering rotation on service: {service_rotate_url}")
+
+        rotate_response = requests.post(
+            service_rotate_url,
+            timeout=10,
+        )
+
+        if rotate_response.status_code == 200:
+            logger.info(
+                f"✅ Service {service_name} successfully rotated to port {new_port}"
+            )
+            response_data["service_rotated"] = True
+        else:
+            logger.warning(
+                f"⚠️  Service {service_name} rotation endpoint failed: {rotate_response.status_code}"
+            )
+            response_data["service_rotated"] = False
+            response_data["warning"] = (
+                "Service rotation endpoint failed, but new port allocated"
+            )
+
+    except Exception as e:
+        logger.error(f"❌ Failed to trigger service rotation: {e}")
+        response_data["service_rotated"] = False
+        response_data["warning"] = f"Could not reach service /rotate endpoint: {str(e)}"
+
     return jsonify(response_data), 200
 
 

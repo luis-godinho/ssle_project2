@@ -16,6 +16,7 @@ import os
 import subprocess
 import time
 from threading import Thread
+from threading import Thread, Lock
 
 from flask import Flask, jsonify, request
 from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
@@ -42,6 +43,7 @@ ROTATION_INTERVAL = int(os.environ.get("ROTATION_INTERVAL", "300"))  # 5 minutes
 # Global state
 current_external_port = INITIAL_PORT
 rotation_count = 0
+rotation_lock = Lock()
 
 # Sample products
 products = {
@@ -66,26 +68,55 @@ def setup_initial_iptables():
     """
     try:
         # Remove any existing rules for this service first
-        subprocess.run([
-            "iptables", "-t", "nat", "-D", "PREROUTING",
-            "-p", "tcp", "--dport", str(current_external_port),
-            "-j", "REDIRECT", "--to-port", str(INTERNAL_PORT)
-        ], stderr=subprocess.DEVNULL)
-        
+        subprocess.run(
+            [
+                "iptables",
+                "-t",
+                "nat",
+                "-D",
+                "PREROUTING",
+                "-p",
+                "tcp",
+                "--dport",
+                str(current_external_port),
+                "-j",
+                "REDIRECT",
+                "--to-port",
+                str(INTERNAL_PORT),
+            ],
+            stderr=subprocess.DEVNULL,
+        )
+
         # Add new rule: external_port -> INTERNAL_PORT
-        result = subprocess.run([
-            "iptables", "-t", "nat", "-A", "PREROUTING",
-            "-p", "tcp", "--dport", str(current_external_port),
-            "-j", "REDIRECT", "--to-port", str(INTERNAL_PORT)
-        ], capture_output=True, text=True)
-        
+        result = subprocess.run(
+            [
+                "iptables",
+                "-t",
+                "nat",
+                "-A",
+                "PREROUTING",
+                "-p",
+                "tcp",
+                "--dport",
+                str(current_external_port),
+                "-j",
+                "REDIRECT",
+                "--to-port",
+                str(INTERNAL_PORT),
+            ],
+            capture_output=True,
+            text=True,
+        )
+
         if result.returncode == 0:
-            logger.info(f"✅ iptables: External port {current_external_port} -> Internal port {INTERNAL_PORT}")
+            logger.info(
+                f"✅ iptables: External port {current_external_port} -> Internal port {INTERNAL_PORT}"
+            )
             return True
         else:
             logger.error(f"❌ iptables setup failed: {result.stderr}")
             return False
-            
+
     except Exception as e:
         logger.error(f"❌ iptables error: {e}")
         return False
@@ -99,21 +130,48 @@ def rotate_iptables_port(old_port, new_port):
     """
     try:
         # Remove old rule
-        subprocess.run([
-            "iptables", "-t", "nat", "-D", "PREROUTING",
-            "-p", "tcp", "--dport", str(old_port),
-            "-j", "REDIRECT", "--to-port", str(INTERNAL_PORT)
-        ], stderr=subprocess.DEVNULL)
-        
+        subprocess.run(
+            [
+                "iptables",
+                "-t",
+                "nat",
+                "-D",
+                "PREROUTING",
+                "-p",
+                "tcp",
+                "--dport",
+                str(old_port),
+                "-j",
+                "REDIRECT",
+                "--to-port",
+                str(INTERNAL_PORT),
+            ],
+            stderr=subprocess.DEVNULL,
+        )
+
         logger.info(f"🛑 Removed iptables rule: {old_port} -> {INTERNAL_PORT}")
-        
+
         # Add new rule
-        result = subprocess.run([
-            "iptables", "-t", "nat", "-A", "PREROUTING",
-            "-p", "tcp", "--dport", str(new_port),
-            "-j", "REDIRECT", "--to-port", str(INTERNAL_PORT)
-        ], capture_output=True, text=True)
-        
+        result = subprocess.run(
+            [
+                "iptables",
+                "-t",
+                "nat",
+                "-A",
+                "PREROUTING",
+                "-p",
+                "tcp",
+                "--dport",
+                str(new_port),
+                "-j",
+                "REDIRECT",
+                "--to-port",
+                str(INTERNAL_PORT),
+            ],
+            capture_output=True,
+            text=True,
+        )
+
         if result.returncode == 0:
             logger.info(f"✅ Added iptables rule: {new_port} -> {INTERNAL_PORT}")
             logger.info(f"🔄 MTD: External port rotated from {old_port} to {new_port}")
@@ -121,30 +179,91 @@ def rotate_iptables_port(old_port, new_port):
         else:
             logger.error(f"❌ iptables rotation failed: {result.stderr}")
             return False
-            
+
     except Exception as e:
         logger.error(f"❌ iptables rotation error: {e}")
         return False
 
 
+@app.route("/rotate", methods=["POST"])
+def handle_rotation():
+    """
+    Handle MTD rotation request from external trigger.
+    This endpoint allows manual rotation testing.
+    """
+    global current_external_port, rotation_count
+
+    with rotation_lock:
+        try:
+            # Request new port from registry
+            response = requests.post(
+                f"{REGISTRY_URL}/rotate/{SERVICE_NAME}",
+                timeout=10,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                new_port = data.get("new_port")
+                old_port = current_external_port
+
+                if new_port and new_port != old_port:
+                    # Rotate using iptables
+                    if rotate_iptables_port(old_port, new_port):
+                        current_external_port = new_port
+                        rotation_count += 1
+                        mtd_rotations_total.inc()
+
+                        # Re-register with new port
+                        register_with_registry(new_port)
+
+                        logger.info(f"✅ Manual MTD rotation: {old_port} → {new_port}")
+
+                        return jsonify(
+                            {
+                                "status": "success",
+                                "old_port": old_port,
+                                "new_port": new_port,
+                                "rotation_count": rotation_count,
+                            }
+                        ), 200
+                    else:
+                        return jsonify({"error": "iptables rotation failed"}), 500
+                else:
+                    return jsonify({"error": "No port change needed"}), 400
+            else:
+                return jsonify(
+                    {
+                        "error": "Registry rotation failed",
+                        "status": response.status_code,
+                    }
+                ), 500
+
+        except Exception as e:
+            logger.error(f"Rotation error: {e}")
+            return jsonify({"error": str(e)}), 500
+
+
 @app.route("/health", methods=["GET"])
 def health():
     """Health check"""
-    return jsonify({
-        "status": "healthy",
-        "service": SERVICE_NAME,
-        "internal_port": INTERNAL_PORT,
-        "external_port": current_external_port,
-        "mtd_enabled": MTD_ENABLED,
-        "rotation_count": rotation_count,
-        "timestamp": time.time(),
-    }), 200
+    return jsonify(
+        {
+            "status": "healthy",
+            "service": SERVICE_NAME,
+            "internal_port": INTERNAL_PORT,
+            "external_port": current_external_port,
+            "mtd_enabled": MTD_ENABLED,
+            "rotation_count": rotation_count,
+            "timestamp": time.time(),
+        }
+    ), 200
 
 
 @app.route("/metrics")
 def metrics():
     """Prometheus metrics"""
     from flask import Response
+
     for prod_id, prod in products.items():
         product_stock_gauge.labels(product_id=prod_id).set(prod["stock"])
     mtd_current_port.set(current_external_port)
@@ -155,12 +274,14 @@ def metrics():
 def list_products():
     """List all products"""
     product_requests_total.inc()
-    return jsonify({
-        "products": list(products.values()),
-        "count": len(products),
-        "internal_port": INTERNAL_PORT,
-        "external_port": current_external_port,
-    }), 200
+    return jsonify(
+        {
+            "products": list(products.values()),
+            "count": len(products),
+            "internal_port": INTERNAL_PORT,
+            "external_port": current_external_port,
+        }
+    ), 200
 
 
 @app.route("/api/products/<product_id>", methods=["GET"])
@@ -179,11 +300,11 @@ def create_product():
     required = ["id", "name", "price"]
     if not all(field in data for field in required):
         return jsonify({"error": "Missing required fields"}), 400
-    
+
     product_id = data["id"]
     if product_id in products:
         return jsonify({"error": "Product already exists"}), 400
-    
+
     products[product_id] = {
         "id": product_id,
         "name": data["name"],
@@ -199,11 +320,11 @@ def update_stock(product_id):
     """Update product stock"""
     if product_id not in products:
         return jsonify({"error": "Product not found"}), 404
-    
+
     data = request.get_json()
     if "stock" not in data:
         return jsonify({"error": "Missing stock field"}), 400
-    
+
     products[product_id]["stock"] = data["stock"]
     logger.info(f"Stock updated for {product_id}: {data['stock']}")
     return jsonify(products[product_id]), 200
@@ -247,37 +368,39 @@ def send_heartbeat():
 def mtd_rotation_loop():
     """Automatic MTD rotation loop using iptables"""
     global current_external_port, rotation_count
-    
+
     while True:
         try:
             time.sleep(ROTATION_INTERVAL)
-            
+
             logger.info(f"🔄 MTD: Requesting port rotation from registry...")
-            
+
             # Ask registry for new port
             response = requests.post(
                 f"{REGISTRY_URL}/rotate/{SERVICE_NAME}",
                 timeout=10,
             )
-            
+
             if response.status_code == 200:
                 data = response.json()
                 new_port = data.get("new_port")
                 old_port = current_external_port
-                
+
                 if new_port and new_port != old_port:
                     # Rotate using iptables
                     if rotate_iptables_port(old_port, new_port):
                         current_external_port = new_port
                         rotation_count += 1
                         mtd_rotations_total.inc()
-                        
+
                         # Re-register with new port
                         register_with_registry(new_port)
-                        
-                        logger.info(f"✅ MTD rotation complete: {old_port} → {new_port}")
+
+                        logger.info(
+                            f"✅ MTD rotation complete: {old_port} → {new_port}"
+                        )
                     else:
-                        logger.error(f"❌ MTD rotation failed")
+                        logger.error("❌ MTD rotation failed")
         except Exception as e:
             logger.error(f"MTD rotation error: {e}")
             time.sleep(10)
@@ -289,23 +412,25 @@ if __name__ == "__main__":
     logger.info(f"External port (initial): {INITIAL_PORT}")
     logger.info(f"MTD enabled: {MTD_ENABLED}")
     logger.info(f"Rotation interval: {ROTATION_INTERVAL}s")
-    
+
     if MTD_ENABLED:
         # Setup initial iptables rule
         if setup_initial_iptables():
             # Register with service registry
             register_with_registry(INITIAL_PORT)
-            
+
             # Start heartbeat thread
             heartbeat_thread = Thread(target=send_heartbeat, daemon=True)
             heartbeat_thread.start()
-            
+
             # Start MTD rotation loop
             logger.info(f"🔄 MTD: Automatic rotation enabled")
             rotation_thread = Thread(target=mtd_rotation_loop, daemon=True)
             rotation_thread.start()
         else:
-            logger.warning("⚠️  MTD disabled - iptables setup failed (need NET_ADMIN capability)")
-    
+            logger.warning(
+                "⚠️  MTD disabled - iptables setup failed (need NET_ADMIN capability)"
+            )
+
     # Start Flask on INTERNAL_PORT (iptables redirects external traffic here)
     app.run(host="0.0.0.0", port=INTERNAL_PORT, debug=False)
