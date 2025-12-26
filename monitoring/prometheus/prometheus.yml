@@ -1,0 +1,77 @@
+# Prometheus Configuration for SSLE Project 2
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'ssle-project2'
+    environment: 'development'
+
+# Scrape configurations
+scrape_configs:
+  # Service Registry
+  - job_name: 'registry'
+    static_configs:
+      - targets: ['registry:5000']
+        labels:
+          service: 'registry'
+          type: 'infrastructure'
+
+  # API Gateway
+  - job_name: 'api-gateway'
+    static_configs:
+      - targets: ['api-gateway:8080']
+        labels:
+          service: 'api-gateway'
+          type: 'gateway'
+
+  # BFT Order Service Cluster (3 nodes)
+  - job_name: 'order-service'
+    static_configs:
+      - targets:
+        - 'order-node-1:8002'
+        - 'order-node-2:8012'
+        - 'order-node-3:8022'
+        labels:
+          service: 'order-service'
+          type: 'bft-cluster'
+
+  # Product Service (MTD-enabled)
+  - job_name: 'product-service'
+    static_configs:
+      - targets: ['product-service:8001']
+        labels:
+          service: 'product-service'
+          type: 'backend'
+
+  # Payment Service
+  - job_name: 'payment-service'
+    static_configs:
+      - targets: ['payment-service:8003']
+        labels:
+          service: 'payment-service'
+          type: 'backend'
+
+  # Email Service
+  - job_name: 'email-service'
+    static_configs:
+      - targets: ['email-service:8004']
+        labels:
+          service: 'email-service'
+          type: 'backend'
+
+  # Web Service
+  - job_name: 'web-service'
+    static_configs:
+      - targets: ['web-service:8000']
+        labels:
+          service: 'web-service'
+          type: 'frontend'
+
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+          type: 'monitoring'
