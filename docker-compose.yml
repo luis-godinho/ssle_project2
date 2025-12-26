@@ -38,7 +38,8 @@ services:
       - QUORUM_SIZE=2
       - BFT_ENABLED=true
       - WAZUH_MANAGER=wazuh.manager
-    env_file: ".env"
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN:-}
     depends_on:
       - registry
       - vault
@@ -63,7 +64,8 @@ services:
       - QUORUM_SIZE=2
       - BFT_ENABLED=true
       - WAZUH_MANAGER=wazuh.manager
-    env_file: ".env"
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN:-}
     depends_on:
       - registry
       - vault
@@ -88,7 +90,8 @@ services:
       - QUORUM_SIZE=2
       - BFT_ENABLED=true
       - WAZUH_MANAGER=wazuh.manager
-    env_file: ".env"
+      - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN:-}
     depends_on:
       - registry
       - vault
@@ -99,22 +102,24 @@ services:
 
   # ==================== BACKEND SERVICES (MTD) ====================
 
-  # Product Service with MTD
+  # Product Service with MTD (iptables port hopping)
   product-service:
     build: ./services/product-service
     container_name: product-service
     hostname: product.ecommerce.local
+    cap_add:
+      - NET_ADMIN  # Required for iptables MTD
     ports:
-      - "8001-8011:8001-8011" # MTD port range
+      - "8000-8011:8000-8011" # MTD port range (includes INTERNAL_PORT 8000)
     environment:
       - REGISTRY_URL=http://registry:5000
       - SERVICE_NAME=product-service
       - MTD_ENABLED=true
-      - MTD_PORT_RANGE=8001-8011
       - INITIAL_PORT=8001
-      - ROTATION_INTERVAL=300
+      - ROTATION_INTERVAL=60  # 1 minute for testing (use 300 for production)
       - WAZUH_MANAGER=wazuh.manager
       - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN:-}
     depends_on:
       - registry
       - vault
@@ -139,6 +144,7 @@ services:
       - ROTATION_INTERVAL=300
       - WAZUH_MANAGER=wazuh.manager
       - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN:-}
     depends_on:
       - registry
       - vault
@@ -162,6 +168,7 @@ services:
       - ROTATION_INTERVAL=300
       - WAZUH_MANAGER=wazuh.manager
       - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN:-}
     depends_on:
       - registry
       - vault
@@ -196,6 +203,7 @@ services:
       - BFT_LOAD_BALANCE=true # Round-robin to order cluster
       - WAZUH_MANAGER=wazuh.manager
       - VAULT_ADDR=http://vault:8200
+      - VAULT_TOKEN=${VAULT_TOKEN:-}
     depends_on:
       - registry
       - vault
@@ -289,7 +297,7 @@ services:
       - wazuh_queue:/var/ossec/queue
       - wazuh_var_multigroups:/var/ossec/var/multigroups
       - wazuh_integrations:/var/ossec/integrations
-      - wazuh_active_response:/var/ossec/active-response/bin
+      - wazuh_active_response:/var/ossec/active_response/bin
       - wazuh_agentless:/var/ossec/agentless
       - wazuh_wodles:/var/ossec/wodles
       - filebeat_etc:/etc/filebeat
