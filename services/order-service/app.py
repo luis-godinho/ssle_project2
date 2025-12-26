@@ -8,13 +8,16 @@ Features:
 - State replication
 - Quorum-based decision making
 - Vault-based node authentication
+- Service registry integration for MTD
 """
 
 import json
 import logging
 import os
 import time
+import requests
 from datetime import datetime
+from threading import Thread
 
 from flask import Flask, jsonify, request
 from prometheus_client import Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
@@ -33,9 +36,11 @@ logger = logging.getLogger(__name__)
 # Configuration
 NODE_ID = os.environ.get("NODE_ID", "order-node-1")
 NODE_PORT = int(os.environ.get("NODE_PORT", "8002"))
+SERVICE_NAME = os.environ.get("SERVICE_NAME", "order-service")
+REGISTRY_URL = os.environ.get("REGISTRY_URL", "http://registry:5000")
 CLUSTER_NODES = os.environ.get(
     "CLUSTER_NODES",
-    "http://order-node-1:8002,http://order-node-2:8012,http://order-node-3:8022"
+    "order-node-1:8002,order-node-2:8012,order-node-3:8022"
 ).split(",")
 
 # Initialize BFT consensus
@@ -53,6 +58,84 @@ order_consensus_proposals = Counter("order_consensus_proposals_total", "Total co
 order_consensus_approved = Counter("order_consensus_approved_total", "Total approved operations")
 order_consensus_rejected = Counter("order_consensus_rejected_total", "Total rejected operations")
 order_cluster_quorum = Gauge("order_cluster_quorum_available", "Whether cluster has quorum")
+
+
+def register_with_registry():
+    """Register this node with the service registry (runs once at startup)"""
+    max_retries = 10
+    retry_delay = 5
+    
+    for attempt in range(max_retries):
+        try:
+            # Only the primary node (node-1) registers as "order-service"
+            # This provides a single entry point for the BFT cluster
+            if NODE_ID == "order-node-1":
+                logger.info(f"Registering {SERVICE_NAME} with registry at {REGISTRY_URL}")
+                
+                response = requests.post(
+                    f"{REGISTRY_URL}/register",
+                    json={
+                        "service_name": SERVICE_NAME,
+                        "port": NODE_PORT,
+                        "hostname": NODE_ID,
+                        "mtd_enabled": False,  # BFT cluster doesn't rotate ports
+                        "metadata": {
+                            "type": "bft-cluster",
+                            "node_id": NODE_ID,
+                            "cluster_size": len(CLUSTER_NODES),
+                            "quorum_size": consensus.quorum_size
+                        }
+                    },
+                    timeout=5
+                )
+                
+                if response.status_code in [200, 201]:
+                    logger.info(f"✅ Successfully registered {SERVICE_NAME} with registry")
+                    return True
+                else:
+                    logger.warning(f"Registry returned status {response.status_code}: {response.text}")
+            else:
+                # Secondary nodes just log their status
+                logger.info(f"Node {NODE_ID} is secondary - primary node handles registration")
+                return True
+                
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Attempt {attempt + 1}/{max_retries} - Failed to register: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+            else:
+                logger.error("Failed to register with service registry after all retries")
+                return False
+    
+    return False
+
+
+def heartbeat_loop():
+    """Send periodic heartbeats to service registry"""
+    while True:
+        try:
+            time.sleep(30)  # Heartbeat every 30 seconds
+            
+            if NODE_ID == "order-node-1":  # Only primary sends heartbeats
+                response = requests.post(
+                    f"{REGISTRY_URL}/heartbeat",
+                    json={
+                        "service_name": SERVICE_NAME,
+                        "port": NODE_PORT,
+                        "healthy": True,
+                        "metadata": {
+                            "healthy_nodes": consensus.get_cluster_status()["healthy_nodes"],
+                            "quorum_available": consensus.get_cluster_status()["quorum_available"]
+                        }
+                    },
+                    timeout=5
+                )
+                
+                if response.status_code != 200:
+                    logger.warning(f"Heartbeat failed: {response.status_code}")
+                    
+        except Exception as e:
+            logger.error(f"Heartbeat error: {e}")
 
 
 @app.route("/health", methods=["GET"])
@@ -225,5 +308,12 @@ if __name__ == "__main__":
     logger.info(f"Cluster nodes: {CLUSTER_NODES}")
     logger.info(f"Quorum requirement: {consensus.quorum_size}/{consensus.cluster_size}")
     logger.info(f"Vault authentication: {'enabled' if consensus.auth_token else 'disabled'}")
+    
+    # Register with service registry in background
+    Thread(target=register_with_registry, daemon=True).start()
+    
+    # Start heartbeat thread (only for primary node)
+    if NODE_ID == "order-node-1":
+        Thread(target=heartbeat_loop, daemon=True).start()
     
     app.run(host="0.0.0.0", port=NODE_PORT, debug=False)
