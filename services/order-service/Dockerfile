@@ -5,6 +5,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy vault client
+COPY vault_client.py .
+
 # Copy service files
 COPY consensus.py .
 COPY app.py .
