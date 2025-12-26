@@ -233,7 +233,7 @@ services:
 
   # HashiCorp Vault - Secret Management
   vault:
-    image: hashicorp/vault:latest
+    build: ./vault
     container_name: vault
     hostname: vault.ecommerce.local
     ports:
@@ -244,10 +244,7 @@ services:
     cap_add:
       - IPC_LOCK
     volumes:
-      - vault-data:/vault/file
-      - ./vault/config.hcl:/vault/config/config.hcl
-      - ./vault/policies:/vault/policies
-    command: server -dev
+      - vault-data:/vault/data
     healthcheck:
       test: ["CMD", "vault", "status"]
       interval: 30s
@@ -401,8 +398,6 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
-      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
@@ -419,6 +414,9 @@ services:
     volumes:
       - ./monitoring/alertmanager/config.yml:/etc/alertmanager/config.yml
       - alertmanager-data:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/config.yml"
+      - "--storage.path=/alertmanager"
     restart: unless-stopped
     networks:
       - ecommerce-network
