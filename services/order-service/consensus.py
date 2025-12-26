@@ -1,22 +1,30 @@
 #!/usr/bin/env python3
 """
-Byzantine Fault Tolerance Consensus Module
+Byzantine Fault Tolerance Consensus Module with Vault Authentication
 
 Implements a simple BFT consensus protocol:
 - Leader proposes operations
 - All replicas vote
 - 2f+1 agreement required (where f=1, so need 2/3 nodes)
 - State replication across nodes
+- Node authentication using Vault tokens
 """
 
 import hashlib
+import hmac
 import json
 import logging
+import os
+import sys
 import time
 from threading import Lock
 from typing import Dict, List, Optional
 
 import requests
+
+# Add parent directory to path for vault_client import
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from vault_client import vault_client
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +43,15 @@ class BFTConsensus:
         self.cluster_size = len(cluster_nodes)
         self.quorum_size = (2 * self.cluster_size) // 3 + 1  # 2f+1 where f = (n-1)//3
         
+        # Get authentication token from Vault
+        node_name = node_id.split(':')[0]  # Extract 'order-node-1' from 'order-node-1:8002'
+        self.auth_token = vault_client.get_bft_node_token(node_name)
+        
+        if self.auth_token:
+            logger.info(f"Node authentication token loaded from Vault for {node_name}")
+        else:
+            logger.warning(f"No Vault token for {node_name} - authentication disabled")
+        
         # Consensus state
         self.pending_operations = {}  # {operation_id: {data, votes, status}}
         self.operations_lock = Lock()
@@ -42,6 +59,71 @@ class BFTConsensus:
         logger.info(f"BFT Consensus initialized: {node_id}")
         logger.info(f"Cluster: {cluster_nodes}")
         logger.info(f"Quorum: {self.quorum_size}/{self.cluster_size}")
+        logger.info(f"Vault authentication: {'enabled' if self.auth_token else 'disabled'}")
+    
+    def _sign_vote(self, operation_id: str, vote: str) -> str:
+        """
+        Sign a vote using node's authentication token
+        
+        Args:
+            operation_id: Operation ID being voted on
+            vote: Vote value ('approve' or 'reject')
+        
+        Returns:
+            str: HMAC signature of vote
+        """
+        if not self.auth_token:
+            return "no-auth"  # No authentication when Vault disabled
+        
+        message = f"{operation_id}:{vote}:{self.node_id}"
+        signature = hmac.new(
+            self.auth_token.encode(),
+            message.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        return signature
+    
+    def _verify_vote_signature(self, node_id: str, operation_id: str, vote: str, signature: str) -> bool:
+        """
+        Verify a vote signature from another node
+        
+        Args:
+            node_id: Node that cast the vote
+            operation_id: Operation ID
+            vote: Vote value
+            signature: Vote signature to verify
+        
+        Returns:
+            bool: True if signature is valid
+        """
+        if signature == "no-auth":
+            # No authentication - allow vote (dev mode)
+            return True
+        
+        # Get the node's token from Vault
+        node_name = node_id.split(':')[0]
+        node_token = vault_client.get_bft_node_token(node_name)
+        
+        if not node_token:
+            logger.warning(f"Cannot verify vote from {node_id} - no token in Vault")
+            return True  # Allow if Vault unavailable (graceful degradation)
+        
+        # Compute expected signature
+        message = f"{operation_id}:{vote}:{node_id}"
+        expected_signature = hmac.new(
+            node_token.encode(),
+            message.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        if signature != expected_signature:
+            logger.error(f"BYZANTINE BEHAVIOR DETECTED: Invalid vote signature from {node_id}")
+            logger.error(f"  Expected: {expected_signature[:16]}...")
+            logger.error(f"  Received: {signature[:16]}...")
+            return False
+        
+        return True
     
     def propose_operation(self, operation_type: str, operation_data: dict) -> dict:
         """
@@ -73,43 +155,57 @@ class BFTConsensus:
         # Request votes from all nodes
         votes = self._request_votes(operation_id, operation_type, operation_data)
         
-        # Count votes
-        approved_count = sum(1 for vote in votes.values() if vote == "approve")
-        rejected_count = sum(1 for vote in votes.values() if vote == "reject")
+        # Verify vote signatures and count valid votes
+        valid_votes = {}
+        for node, vote_info in votes.items():
+            if isinstance(vote_info, dict):
+                vote = vote_info.get("vote")
+                signature = vote_info.get("signature")
+                
+                if self._verify_vote_signature(node, operation_id, vote, signature):
+                    valid_votes[node] = vote
+                else:
+                    logger.warning(f"Rejected invalid vote from {node}")
+                    valid_votes[node] = "invalid_signature"
+            else:
+                valid_votes[node] = vote_info
+        
+        # Count approved votes (only valid signatures)
+        approved_count = sum(1 for vote in valid_votes.values() if vote == "approve")
         
         # Update operation status
         with self.operations_lock:
             if operation_id in self.pending_operations:
-                self.pending_operations[operation_id]["votes"] = votes
+                self.pending_operations[operation_id]["votes"] = valid_votes
                 
                 if approved_count >= self.quorum_size:
                     self.pending_operations[operation_id]["status"] = "committed"
-                    logger.info(f"Operation {operation_id} COMMITTED ({approved_count}/{self.cluster_size} votes)")
+                    logger.info(f"Operation {operation_id} COMMITTED ({approved_count}/{self.cluster_size} valid votes)")
                     return {
                         "success": True,
                         "operation_id": operation_id,
-                        "votes": votes,
+                        "votes": valid_votes,
                         "approved": approved_count,
                         "quorum": self.quorum_size,
                     }
                 else:
                     self.pending_operations[operation_id]["status"] = "rejected"
-                    logger.warning(f"Operation {operation_id} REJECTED ({approved_count}/{self.cluster_size} votes, need {self.quorum_size})")
+                    logger.warning(f"Operation {operation_id} REJECTED ({approved_count}/{self.cluster_size} valid votes, need {self.quorum_size})")
                     return {
                         "success": False,
                         "operation_id": operation_id,
-                        "votes": votes,
+                        "votes": valid_votes,
                         "approved": approved_count,
                         "quorum": self.quorum_size,
                         "reason": "quorum not reached",
                     }
     
-    def _request_votes(self, operation_id: str, operation_type: str, operation_data: dict) -> Dict[str, str]:
+    def _request_votes(self, operation_id: str, operation_type: str, operation_data: dict) -> Dict[str, dict]:
         """
         Request votes from all cluster nodes
         
         Returns:
-            dict: {node_id: "approve"|"reject"}
+            dict: {node_id: {"vote": "approve"|"reject", "signature": "..."}}
         """
         votes = {}
         
@@ -128,7 +224,10 @@ class BFTConsensus:
                 
                 if response.status_code == 200:
                     vote_data = response.json()
-                    votes[vote_data["node"]] = vote_data["vote"]
+                    votes[vote_data["node"]] = {
+                        "vote": vote_data["vote"],
+                        "signature": vote_data.get("signature", "no-auth"),
+                    }
                     logger.debug(f"Vote from {vote_data['node']}: {vote_data['vote']}")
                 else:
                     logger.warning(f"Failed to get vote from {node_url}: {response.status_code}")
@@ -140,9 +239,9 @@ class BFTConsensus:
         
         return votes
     
-    def validate_and_vote(self, operation_id: str, operation_type: str, operation_data: dict, proposer: str) -> str:
+    def validate_and_vote(self, operation_id: str, operation_type: str, operation_data: dict, proposer: str) -> tuple:
         """
-        Validate an operation and return vote
+        Validate an operation and return vote with signature
         
         Args:
             operation_id: Operation identifier
@@ -151,25 +250,30 @@ class BFTConsensus:
             proposer: Node that proposed the operation
         
         Returns:
-            str: "approve" or "reject"
+            tuple: (vote: str, signature: str)
         """
         logger.info(f"Validating operation {operation_id} from {proposer}")
         
         # Validation logic
         try:
             if operation_type == "CREATE_ORDER":
-                return self._validate_create_order(operation_data)
+                vote = self._validate_create_order(operation_data)
             elif operation_type == "UPDATE_STATUS":
-                return self._validate_update_status(operation_data)
+                vote = self._validate_update_status(operation_data)
             elif operation_type == "CANCEL_ORDER":
-                return self._validate_cancel_order(operation_data)
+                vote = self._validate_cancel_order(operation_data)
             else:
                 logger.warning(f"Unknown operation type: {operation_type}")
-                return "reject"
+                vote = "reject"
         
         except Exception as e:
             logger.error(f"Validation error: {e}")
-            return "reject"
+            vote = "reject"
+        
+        # Sign the vote
+        signature = self._sign_vote(operation_id, vote)
+        
+        return vote, signature
     
     def _validate_create_order(self, data: dict) -> str:
         """Validate order creation"""
@@ -245,6 +349,7 @@ class BFTConsensus:
             "quorum_size": self.quorum_size,
             "quorum_available": quorum_available,
             "nodes": node_statuses,
+            "vault_auth_enabled": bool(self.auth_token),
         }
     
     def get_operation_status(self, operation_id: str) -> Optional[dict]:
