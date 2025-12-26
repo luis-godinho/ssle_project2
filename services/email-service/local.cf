@@ -1,0 +1,38 @@
+# ================================
+# SpamAssassin local.cf
+# ================================
+
+required_score 5.0
+use_bayes 1
+bayes_auto_learn 1
+
+skip_rbl_checks 0
+
+# Subject rewrite
+rewrite_header Subject [SPAM]
+
+# Add spam headers
+add_header all Spam-Scanned Yes
+add_header all Status _YESNO_, score=_SCORE_ required=_REQD_
+add_header all Score _SCORE_/_REQD_
+add_header all Level _STARS(*)_
+
+# ----------------------
+# Custom spam rules
+# ----------------------
+
+score MANY_EXCLAMATIONS 2.0
+score SUBJ_ALL_CAPS 1.5
+score SUSPICIOUS_RECIPS 2.0
+
+body NIGERIAN_PRINCE /nigerian prince|inheritance|beneficiary|claim.*money/i
+describe NIGERIAN_PRINCE Nigerian prince scam patterns
+score NIGERIAN_PRINCE 5.0
+
+body LOTTERY_SCAM /won.*lottery|winner.*prize|claim.*jackpot|10000th.*visitor/i
+describe LOTTERY_SCAM Lottery scam patterns
+score LOTTERY_SCAM 5.0
+
+body URGENT_FINANCIAL /urgent.*financial|quick.*money|easy.*cash|limited.*offer/i
+describe URGENT_FINANCIAL Urgent financial offer patterns
+score URGENT_FINANCIAL 3.0

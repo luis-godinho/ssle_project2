@@ -1,0 +1,33 @@
+# SpamAssassin local configuration
+
+# Required score for spam detection (default: 5.0)
+required_score 5.0
+
+# Use Bayes filtering
+use_bayes 1
+bayes_auto_learn 1
+
+# Enable network checks
+skip_rbl_checks 0
+
+# Rewrite subject line for spam
+rewrite_header Subject [SPAM]
+
+# Custom spam rules
+score MANY_EXCLAMATIONS 2.0
+score SUBJ_ALL_CAPS 1.5
+score SUSPICIOUS_RECIPS 2.0
+
+# Nigerian prince and lottery scams
+body NIGERIAN_PRINCE /nigerian prince|inheritance|beneficiary|claim.*money/i
+describe NIGERIAN_PRINCE Nigerian prince scam patterns
+score NIGERIAN_PRINCE 5.0
+
+body LOTTERY_SCAM /won.*lottery|winner.*prize|claim.*jackpot|10000th.*visitor/i
+describe LOTTERY_SCAM Lottery scam patterns
+score LOTTERY_SCAM 5.0
+
+# Urgent financial offers
+body URGENT_FINANCIAL /urgent.*financial|quick.*money|easy.*cash|limited.*offer/i
+describe URGENT_FINANCIAL Urgent financial offer patterns
+score URGENT_FINANCIAL 3.0

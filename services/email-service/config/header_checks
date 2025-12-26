@@ -1,0 +1,2 @@
+# /etc/postfix/header_checks
+/^X-Spam-Flag: YES/ DISCARD Spam detected by SpamAssassin
