@@ -34,7 +34,7 @@ services:
       - SERVICE_NAME=order-service
       - NODE_ID=order-node-1
       - NODE_PORT=8002
-      - CLUSTER_NODES=order-node-1:8102,order-node-2:8112,order-node-3:8122
+      - CLUSTER_NODES=order-node-1:8002,order-node-2:8012,order-node-3:8022
       - QUORUM_SIZE=2
       - BFT_ENABLED=true
       - WAZUH_MANAGER=wazuh.manager

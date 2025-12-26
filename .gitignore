@@ -52,3 +52,6 @@ htmlcov/
 secrets/
 credentials.json
 token.txt
+
+.direnv/
+.envrc

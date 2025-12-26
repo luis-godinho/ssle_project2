@@ -41,7 +41,7 @@
 
           # Test 1: Check cluster quorum
           echo "Test 1: Checking BFT cluster quorum..."
-          response=$(${pkgs.curl}/bin/curl -s http://localhost:8002/consensus/status || echo "ERROR")
+          response=$(${pkgs.curl}/bin/curl -s http://localhost:8102/consensus/status || echo "ERROR")
 
           if [[ "$response" == "ERROR" ]]; then
             echo "❌ Order service not reachable. Is docker-compose running?"
