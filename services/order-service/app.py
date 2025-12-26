@@ -75,10 +75,10 @@ def register_with_registry():
                 response = requests.post(
                     f"{REGISTRY_URL}/register",
                     json={
-                        "service_name": SERVICE_NAME,
+                        "name": SERVICE_NAME,  # Changed from service_name to name
                         "port": NODE_PORT,
-                        "hostname": NODE_ID,
-                        "mtd_enabled": False,  # BFT cluster doesn't rotate ports
+                        "host": NODE_ID,  # Changed from hostname to host
+                        "mtd_enabled": False,
                         "metadata": {
                             "type": "bft-cluster",
                             "node_id": NODE_ID,
@@ -118,10 +118,8 @@ def heartbeat_loop():
             
             if NODE_ID == "order-node-1":  # Only primary sends heartbeats
                 response = requests.post(
-                    f"{REGISTRY_URL}/heartbeat",
+                    f"{REGISTRY_URL}/heartbeat/{SERVICE_NAME}",
                     json={
-                        "service_name": SERVICE_NAME,
-                        "port": NODE_PORT,
                         "healthy": True,
                         "metadata": {
                             "healthy_nodes": consensus.get_cluster_status()["healthy_nodes"],
