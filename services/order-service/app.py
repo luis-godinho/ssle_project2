@@ -9,6 +9,7 @@ Features:
 - Quorum-based decision making
 - Vault-based node authentication
 - Service registry integration for MTD
+- All nodes can propose (no single point of failure)
 """
 
 import json
@@ -61,43 +62,64 @@ order_cluster_quorum = Gauge("order_cluster_quorum_available", "Whether cluster 
 
 
 def register_with_registry():
-    """Register this node with the service registry (runs once at startup)"""
+    """Register this node with the service registry (ALL nodes register)"""
     max_retries = 10
     retry_delay = 5
     
     for attempt in range(max_retries):
         try:
-            # Only the primary node (node-1) registers as "order-service"
-            # This provides a single entry point for the BFT cluster
-            if NODE_ID == "order-node-1":
-                logger.info(f"Registering {SERVICE_NAME} with registry at {REGISTRY_URL}")
+            # Each node registers with a unique name as part of the BFT cluster
+            # Registry will load-balance requests across all registered nodes
+            node_service_name = f"{SERVICE_NAME}-{NODE_ID}"
+            
+            logger.info(f"Registering {node_service_name} with registry at {REGISTRY_URL}")
+            
+            response = requests.post(
+                f"{REGISTRY_URL}/register",
+                json={
+                    "name": node_service_name,  # e.g., "order-service-order-node-1"
+                    "port": NODE_PORT,
+                    "host": NODE_ID,
+                    "mtd_enabled": False,
+                    "metadata": {
+                        "type": "bft-cluster-member",
+                        "cluster_name": SERVICE_NAME,
+                        "node_id": NODE_ID,
+                        "node_role": "proposer",  # All nodes can propose!
+                        "cluster_size": len(CLUSTER_NODES),
+                        "quorum_size": consensus.quorum_size
+                    }
+                },
+                timeout=5
+            )
+            
+            if response.status_code in [200, 201]:
+                logger.info(f"✅ Successfully registered {node_service_name} with registry")
                 
-                response = requests.post(
+                # ALSO register the generic service name for backward compatibility
+                # This allows load-balancing across all nodes
+                response2 = requests.post(
                     f"{REGISTRY_URL}/register",
                     json={
-                        "name": SERVICE_NAME,  # Changed from service_name to name
+                        "name": SERVICE_NAME,  # Generic "order-service"
                         "port": NODE_PORT,
-                        "host": NODE_ID,  # Changed from hostname to host
+                        "host": NODE_ID,
                         "mtd_enabled": False,
                         "metadata": {
-                            "type": "bft-cluster",
-                            "node_id": NODE_ID,
-                            "cluster_size": len(CLUSTER_NODES),
-                            "quorum_size": consensus.quorum_size
+                            "type": "bft-load-balanced",
+                            "actual_node": NODE_ID,
+                            "cluster_member": True
                         }
                     },
                     timeout=5
                 )
                 
-                if response.status_code in [200, 201]:
-                    logger.info(f"✅ Successfully registered {SERVICE_NAME} with registry")
-                    return True
-                else:
-                    logger.warning(f"Registry returned status {response.status_code}: {response.text}")
-            else:
-                # Secondary nodes just log their status
-                logger.info(f"Node {NODE_ID} is secondary - primary node handles registration")
+                if response2.status_code in [200, 201]:
+                    logger.info(f"✅ Successfully registered {SERVICE_NAME} (load-balanced entry)")
+                
                 return True
+            else:
+                logger.warning(f"Registry returned status {response.status_code}: {response.text}")
                 
         except requests.exceptions.RequestException as e:
             logger.warning(f"Attempt {attempt + 1}/{max_retries} - Failed to register: {e}")
@@ -111,26 +133,41 @@ def register_with_registry():
 
 
 def heartbeat_loop():
-    """Send periodic heartbeats to service registry"""
+    """Send periodic heartbeats to service registry (ALL nodes send heartbeats)"""
     while True:
         try:
             time.sleep(30)  # Heartbeat every 30 seconds
             
-            if NODE_ID == "order-node-1":  # Only primary sends heartbeats
-                response = requests.post(
-                    f"{REGISTRY_URL}/heartbeat/{SERVICE_NAME}",
-                    json={
-                        "healthy": True,
-                        "metadata": {
-                            "healthy_nodes": consensus.get_cluster_status()["healthy_nodes"],
-                            "quorum_available": consensus.get_cluster_status()["quorum_available"]
-                        }
-                    },
-                    timeout=5
-                )
-                
-                if response.status_code != 200:
-                    logger.warning(f"Heartbeat failed: {response.status_code}")
+            # Each node sends its own heartbeat
+            node_service_name = f"{SERVICE_NAME}-{NODE_ID}"
+            
+            response = requests.post(
+                f"{REGISTRY_URL}/heartbeat/{node_service_name}",
+                json={
+                    "healthy": True,
+                    "metadata": {
+                        "healthy_nodes": consensus.get_cluster_status()["healthy_nodes"],
+                        "quorum_available": consensus.get_cluster_status()["quorum_available"],
+                        "node_role": "proposer"
+                    }
+                },
+                timeout=5
+            )
+            
+            if response.status_code != 200:
+                logger.warning(f"Heartbeat failed for {node_service_name}: {response.status_code}")
+            
+            # Also send heartbeat for generic service name
+            response2 = requests.post(
+                f"{REGISTRY_URL}/heartbeat/{SERVICE_NAME}",
+                json={
+                    "healthy": True,
+                    "metadata": {
+                        "node_id": NODE_ID
+                    }
+                },
+                timeout=5
+            )
                     
         except Exception as e:
             logger.error(f"Heartbeat error: {e}")
@@ -143,6 +180,7 @@ def health():
         "status": "healthy",
         "node": NODE_ID,
         "port": NODE_PORT,
+        "role": "proposer",  # All nodes can propose
         "vault_auth": bool(consensus.auth_token),
         "timestamp": time.time(),
     }), 200
@@ -157,15 +195,15 @@ def metrics():
 
 @app.route("/api/orders", methods=["POST"])
 def create_order():
-    """Create new order (requires consensus)"""
+    """Create new order (requires consensus) - ANY node can handle this!"""
     data = request.get_json()
     
     if not data or "customer_id" not in data or "items" not in data:
         return jsonify({"error": "Missing required fields"}), 400
     
-    logger.info(f"Order creation request from customer {data['customer_id']}")
+    logger.info(f"[{NODE_ID}] Order creation request from customer {data['customer_id']}")
     
-    # Propose operation to cluster
+    # THIS node proposes the operation to the cluster
     order_consensus_proposals.inc()
     result = consensus.propose_operation("CREATE_ORDER", data)
     
@@ -175,6 +213,7 @@ def create_order():
             "error": "Order creation rejected by cluster",
             "reason": result.get("reason"),
             "votes": result["votes"],
+            "proposed_by": NODE_ID,
         }), 400
     
     # Consensus achieved - create order
@@ -196,7 +235,7 @@ def create_order():
     
     orders[order_id] = order
     
-    logger.info(f"Order {order_id} created with consensus ({result['approved']}/{consensus.cluster_size} votes)")
+    logger.info(f"[{NODE_ID}] Order {order_id} created with consensus ({result['approved']}/{consensus.cluster_size} votes)")
     
     return jsonify(order), 201
 
@@ -222,7 +261,7 @@ def list_orders():
 
 @app.route("/api/orders/<order_id>/status", methods=["PUT"])
 def update_order_status(order_id):
-    """Update order status (requires consensus)"""
+    """Update order status (requires consensus) - ANY node can handle this!"""
     data = request.get_json()
     
     if not data or "status" not in data:
@@ -231,7 +270,7 @@ def update_order_status(order_id):
     if order_id not in orders:
         return jsonify({"error": "Order not found"}), 404
     
-    # Propose status update
+    # THIS node proposes status update
     order_consensus_proposals.inc()
     result = consensus.propose_operation("UPDATE_STATUS", {
         "order_id": order_id,
@@ -243,6 +282,7 @@ def update_order_status(order_id):
         return jsonify({
             "error": "Status update rejected by cluster",
             "votes": result["votes"],
+            "proposed_by": NODE_ID,
         }), 400
     
     # Update status
@@ -251,7 +291,7 @@ def update_order_status(order_id):
     orders[order_id]["updated_at"] = datetime.now().isoformat()
     orders[order_id]["updated_by"] = NODE_ID
     
-    logger.info(f"Order {order_id} status updated to {data['status']} with consensus")
+    logger.info(f"[{NODE_ID}] Order {order_id} status updated to {data['status']} with consensus")
     
     return jsonify(orders[order_id]), 200
 
@@ -303,15 +343,16 @@ def get_operation_status(operation_id):
 if __name__ == "__main__":
     logger.info(f"Order Service starting: {NODE_ID}")
     logger.info(f"Port: {NODE_PORT}")
+    logger.info(f"Role: PROPOSER (all nodes can propose operations)")
     logger.info(f"Cluster nodes: {CLUSTER_NODES}")
     logger.info(f"Quorum requirement: {consensus.quorum_size}/{consensus.cluster_size}")
     logger.info(f"Vault authentication: {'enabled' if consensus.auth_token else 'disabled'}")
+    logger.info(f"No single point of failure - any node can handle requests!")
     
-    # Register with service registry in background
+    # Register with service registry in background (ALL nodes register)
     Thread(target=register_with_registry, daemon=True).start()
     
-    # Start heartbeat thread (only for primary node)
-    if NODE_ID == "order-node-1":
-        Thread(target=heartbeat_loop, daemon=True).start()
+    # Start heartbeat thread (ALL nodes send heartbeats)
+    Thread(target=heartbeat_loop, daemon=True).start()
     
     app.run(host="0.0.0.0", port=NODE_PORT, debug=False)
