@@ -38,8 +38,7 @@ services:
       - QUORUM_SIZE=2
       - BFT_ENABLED=true
       - WAZUH_MANAGER=wazuh.manager
-      - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=${VAULT_TOKEN:-}
+    env_file: ".env"
     depends_on:
       - registry
       - vault
@@ -64,8 +63,7 @@ services:
       - QUORUM_SIZE=2
       - BFT_ENABLED=true
       - WAZUH_MANAGER=wazuh.manager
-      - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=${VAULT_TOKEN:-}
+    env_file: ".env"
     depends_on:
       - registry
       - vault
@@ -90,8 +88,7 @@ services:
       - QUORUM_SIZE=2
       - BFT_ENABLED=true
       - WAZUH_MANAGER=wazuh.manager
-      - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=${VAULT_TOKEN:-}
+    env_file: ".env"
     depends_on:
       - registry
       - vault
@@ -108,7 +105,7 @@ services:
     container_name: product-service
     hostname: product.ecommerce.local
     cap_add:
-      - NET_ADMIN  # Required for iptables MTD
+      - NET_ADMIN # Required for iptables MTD
     ports:
       - "8000-8011:8000-8011" # MTD port range (includes INTERNAL_PORT 8000)
     environment:
@@ -116,7 +113,7 @@ services:
       - SERVICE_NAME=product-service
       - MTD_ENABLED=true
       - INITIAL_PORT=8001
-      - ROTATION_INTERVAL=60  # 1 minute for testing (use 300 for production)
+      - ROTATION_INTERVAL=60 # 1 minute for testing (use 300 for production)
       - WAZUH_MANAGER=wazuh.manager
       - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=${VAULT_TOKEN:-}
