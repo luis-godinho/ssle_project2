@@ -289,35 +289,31 @@ def rotate(service_name):
     # LOCK IS NOW RELEASED!
 
     # Try to trigger rotation on the service itself
-    try:
-        # Call service's /rotate endpoint
-        service_rotate_url = f"{service_url}/rotate"
+    request_data = request.get_json(silent=True) or {}
+    skip_callback = request_data.get("skip_callback", False)
 
-        logger.info(f"🔄 Triggering rotation on service: {service_rotate_url}")
-
-        rotate_response = requests.post(
-            service_rotate_url,
-            timeout=10,
-        )
-
-        if rotate_response.status_code == 200:
-            logger.info(
-                f"✅ Service {service_name} successfully rotated to port {new_port}"
+    if not skip_callback:
+        # Try to trigger rotation on the service
+        try:
+            service_rotate_url = f"{service_url}/rotate"
+            rotate_response = requests.post(
+                service_rotate_url,
+                json={"new_port": new_port},
+                timeout=10,
             )
-            response_data["service_rotated"] = True
-        else:
-            logger.warning(
-                f"⚠️  Service {service_name} rotation endpoint failed: {rotate_response.status_code}"
-            )
+
+            if rotate_response.status_code == 200:
+                logger.info(f"✅ Service {service_name} rotated to port {new_port}")
+                response_data["service_rotated"] = True
+            else:
+                logger.warning(
+                    f"⚠️ Service rotation failed: {rotate_response.status_code}"
+                )
+                response_data["service_rotated"] = False
+
+        except Exception as e:
+            logger.error(f"❌ Failed to trigger service rotation: {e}")
             response_data["service_rotated"] = False
-            response_data["warning"] = (
-                "Service rotation endpoint failed, but new port allocated"
-            )
-
-    except Exception as e:
-        logger.error(f"❌ Failed to trigger service rotation: {e}")
-        response_data["service_rotated"] = False
-        response_data["warning"] = f"Could not reach service /rotate endpoint: {str(e)}"
 
     return jsonify(response_data), 200
 

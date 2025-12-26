@@ -188,55 +188,46 @@ def rotate_iptables_port(old_port, new_port):
 @app.route("/rotate", methods=["POST"])
 def handle_rotation():
     """
-    Handle MTD rotation request from external trigger.
-    This endpoint allows manual rotation testing.
+    Handle MTD rotation request from registry.
+    Registry has ALREADY allocated the port, just need to apply iptables.
     """
     global current_external_port, rotation_count
 
+    # Get new port from request body (registry sends it)
+    data = request.get_json() or {}
+    new_port = data.get("new_port")
+
+    if not new_port:
+        return jsonify({"error": "Missing new_port parameter"}), 400
+
     with rotation_lock:
         try:
-            # Request new port from registry
-            response = requests.post(
-                f"{REGISTRY_URL}/rotate/{SERVICE_NAME}",
-                timeout=10,
-            )
+            old_port = current_external_port
 
-            if response.status_code == 200:
-                data = response.json()
-                new_port = data.get("new_port")
-                old_port = current_external_port
+            if new_port == old_port:
+                return jsonify({"error": "No port change needed"}), 400
 
-                if new_port and new_port != old_port:
-                    # Rotate using iptables
-                    if rotate_iptables_port(old_port, new_port):
-                        current_external_port = new_port
-                        rotation_count += 1
-                        mtd_rotations_total.inc()
+            # Rotate using iptables
+            if rotate_iptables_port(old_port, new_port):
+                current_external_port = new_port
+                rotation_count += 1
+                mtd_rotations_total.inc()
 
-                        # Re-register with new port
-                        register_with_registry(new_port)
+                # Re-register with new port
+                register_with_registry(new_port)
 
-                        logger.info(f"✅ Manual MTD rotation: {old_port} → {new_port}")
+                logger.info(f"✅ MTD rotation applied: {old_port} → {new_port}")
 
-                        return jsonify(
-                            {
-                                "status": "success",
-                                "old_port": old_port,
-                                "new_port": new_port,
-                                "rotation_count": rotation_count,
-                            }
-                        ), 200
-                    else:
-                        return jsonify({"error": "iptables rotation failed"}), 500
-                else:
-                    return jsonify({"error": "No port change needed"}), 400
-            else:
                 return jsonify(
                     {
-                        "error": "Registry rotation failed",
-                        "status": response.status_code,
+                        "status": "success",
+                        "old_port": old_port,
+                        "new_port": new_port,
+                        "rotation_count": rotation_count,
                     }
-                ), 500
+                ), 200
+            else:
+                return jsonify({"error": "iptables rotation failed"}), 500
 
         except Exception as e:
             logger.error(f"Rotation error: {e}")
@@ -373,34 +364,34 @@ def mtd_rotation_loop():
         try:
             time.sleep(ROTATION_INTERVAL)
 
-            logger.info(f"🔄 MTD: Requesting port rotation from registry...")
+            logger.info("🔄 MTD: Automatic rotation triggered...")
 
-            # Ask registry for new port
-            response = requests.post(
-                f"{REGISTRY_URL}/rotate/{SERVICE_NAME}",
-                timeout=10,
-            )
+            with rotation_lock:
+                # Ask registry for new port
+                response = requests.post(
+                    f"{REGISTRY_URL}/rotate/{SERVICE_NAME}",
+                    json={"skip_callback": True},  # ← TELL REGISTRY NOT TO CALL US BACK
+                    timeout=10,
+                )
 
-            if response.status_code == 200:
-                data = response.json()
-                new_port = data.get("new_port")
-                old_port = current_external_port
+                if response.status_code == 200:
+                    data = response.json()
+                    new_port = data.get("new_port")
+                    old_port = current_external_port
 
-                if new_port and new_port != old_port:
-                    # Rotate using iptables
-                    if rotate_iptables_port(old_port, new_port):
-                        current_external_port = new_port
-                        rotation_count += 1
-                        mtd_rotations_total.inc()
+                    if new_port and new_port != old_port:
+                        # Rotate using iptables
+                        if rotate_iptables_port(old_port, new_port):
+                            current_external_port = new_port
+                            rotation_count += 1
+                            mtd_rotations_total.inc()
 
-                        # Re-register with new port
-                        register_with_registry(new_port)
+                            # Re-register with new port
+                            register_with_registry(new_port)
 
-                        logger.info(
-                            f"✅ MTD rotation complete: {old_port} → {new_port}"
-                        )
-                    else:
-                        logger.error("❌ MTD rotation failed")
+                            logger.info(
+                                f"✅ Automatic rotation: {old_port} → {new_port}"
+                            )
         except Exception as e:
             logger.error(f"MTD rotation error: {e}")
             time.sleep(10)
