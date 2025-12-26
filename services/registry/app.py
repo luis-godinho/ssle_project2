@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Service Registry with Moving Target Defense (MTD)
+Service Registry with Moving Target Defense (MTD) and Load Balancing
 
 Features:
 - Service registration and discovery
@@ -8,6 +8,7 @@ Features:
 - Health monitoring
 - Port rotation management
 - Service location tracking
+- Load balancing for BFT clusters (round-robin)
 """
 
 import json
@@ -42,6 +43,10 @@ PORT_RANGES = {
 services = {}  # {service_name: {url, port, host, health, last_heartbeat, rotation_count}}
 services_lock = Lock()
 
+# Load balancer state (for round-robin)
+load_balancer_index = {}  # {service_name: current_index}
+load_balancer_lock = Lock()
+
 # Prometheus metrics
 registry_services_total = Gauge("registry_services_total", "Total registered services")
 registry_rotations_total = Counter(
@@ -49,6 +54,9 @@ registry_rotations_total = Counter(
 )
 registry_heartbeats_total = Counter(
     "registry_heartbeats_total", "Total heartbeats received"
+)
+registry_loadbalance_requests = Counter(
+    "registry_loadbalance_requests_total", "Total load-balanced requests", ["service"]
 )
 
 
@@ -92,6 +100,7 @@ def register():
     service_name = data["name"]
     port = data["port"]
     host = data.get("host", service_name)
+    metadata = data.get("metadata", {})
 
     with services_lock:
         services[service_name] = {
@@ -103,17 +112,63 @@ def register():
             "last_heartbeat": time.time(),
             "rotation_count": services.get(service_name, {}).get("rotation_count", 0),
             "registered_at": datetime.now().isoformat(),
+            "metadata": metadata,
         }
         registry_services_total.set(len(services))
 
     logger.info(f"Registered service: {service_name} at {host}:{port}")
+    if metadata.get("type") == "bft-cluster-member":
+        logger.info(f"  BFT cluster member: {metadata.get('node_id')} (role: {metadata.get('node_role')})")
+    
     return jsonify({"status": "registered", "service": service_name, "port": port}), 200
 
 
 @app.route("/discover/<service_name>", methods=["GET"])
 def discover(service_name):
-    """Discover current location of a service"""
+    """Discover current location of a service with load balancing for BFT clusters"""
     with services_lock:
+        # Check if this is a BFT cluster (multiple nodes registered)
+        cluster_members = [
+            name for name in services.keys()
+            if name.startswith(f"{service_name}-") and services[name].get("metadata", {}).get("type") == "bft-cluster-member"
+        ]
+        
+        if cluster_members:
+            # BFT cluster detected - do load balancing
+            healthy_members = [
+                name for name in cluster_members
+                if services[name]["healthy"]
+            ]
+            
+            if not healthy_members:
+                return jsonify({"error": f"No healthy nodes in {service_name} cluster"}), 503
+            
+            # Round-robin load balancing
+            with load_balancer_lock:
+                if service_name not in load_balancer_index:
+                    load_balancer_index[service_name] = 0
+                
+                index = load_balancer_index[service_name] % len(healthy_members)
+                selected_node = healthy_members[index]
+                load_balancer_index[service_name] = (index + 1) % len(healthy_members)
+            
+            service = services[selected_node]
+            registry_loadbalance_requests.labels(service=service_name).inc()
+            
+            logger.debug(f"Load-balanced {service_name} -> {selected_node}")
+            
+            return jsonify({
+                "name": service_name,
+                "url": service["url"],
+                "port": service["port"],
+                "host": service["host"],
+                "load_balanced": True,
+                "selected_node": selected_node,
+                "healthy_nodes": len(healthy_members),
+                "total_nodes": len(cluster_members),
+            }), 200
+        
+        # Single service (not a cluster)
         if service_name not in services:
             return jsonify({"error": f"Service {service_name} not found"}), 404
 
@@ -128,6 +183,7 @@ def discover(service_name):
                 "url": service["url"],
                 "port": service["port"],
                 "host": service["host"],
+                "load_balanced": False,
             }
         ), 200
 
@@ -146,6 +202,7 @@ def list_services():
                         "healthy": info["healthy"],
                         "rotation_count": info["rotation_count"],
                         "last_heartbeat": info["last_heartbeat"],
+                        "metadata": info.get("metadata", {}),
                     }
                     for name, info in services.items()
                 ]
@@ -171,6 +228,7 @@ def services_status():
                             current_time - info["last_heartbeat"]
                         ),
                         "registered_at": info["registered_at"],
+                        "metadata": info.get("metadata", {}),
                     }
                     for name, info in services.items()
                 ],
@@ -248,7 +306,7 @@ def metrics():
 
 def health_checker():
     """Background thread to check service health"""
-    HEALTH_TIMEOUT = 30  # seconds
+    HEALTH_TIMEOUT = 60  # seconds (increased for BFT nodes)
 
     while True:
         time.sleep(10)
@@ -267,6 +325,7 @@ def health_checker():
 if __name__ == "__main__":
     logger.info("Service Registry starting...")
     logger.info(f"Port ranges configured: {PORT_RANGES}")
+    logger.info("Load balancing enabled for BFT clusters")
 
     # Start health checker thread
     health_thread = Thread(target=health_checker, daemon=True)
