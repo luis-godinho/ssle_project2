@@ -22,6 +22,8 @@ This project implements **Attack Tolerance Mechanisms** for a scalable e-commerc
 - [Risk Management](#risk-management)
 - [Service Architecture](#service-architecture)
 - [Deployment](#deployment)
+  - [Quick Start with Nix](#quick-start-with-nix-recommended)
+  - [Quick Start with Docker](#quick-start-with-docker)
 - [Testing & Validation](#testing--validation)
 - [Monitoring & Evaluation](#monitoring--evaluation)
 - [Integration with Project 1](#integration-with-project-1)
@@ -235,132 +237,20 @@ This project implements **Attack Tolerance Mechanisms** for a scalable e-commerc
 
 ---
 
-## 🏢 Service Architecture
-
-### Core Services
-
-#### 1. Service Registry (Port 5000)
-**Purpose**: Central service discovery with MTD support
-
-**Key Features**:
-- Service registration with dynamic ports
-- Health monitoring and heartbeats
-- Port allocation and rotation management
-- Service location tracking
-- Geographic/logical location metadata
-
-**Endpoints**:
-- `POST /register` - Register service with current port
-- `POST /rotate/{service}` - Request new port allocation
-- `GET /discover/{service}` - Get current service location
-- `GET /services` - List all services and locations
-- `GET /health` - Registry health check
-
-#### 2. Order Service Cluster (Ports 8002, 8012, 8022)
-**Purpose**: Byzantine fault-tolerant order processing
-
-**Key Features**:
-- 3-node consensus cluster (BFT)
-- Leader election and rotation
-- State machine replication
-- Vote-based decision making
-- Order validation and processing
-- Payment coordination
-- Stock management
-
-**Consensus Operations**:
-- `CREATE_ORDER` - Requires 2/3 votes
-- `UPDATE_STATUS` - Requires 2/3 votes
-- `CANCEL_ORDER` - Requires 2/3 votes
-- `PROCESS_PAYMENT` - Requires unanimous votes (3/3)
-
-**Endpoints** (per node):
-- `POST /api/orders` - Create order (triggers consensus)
-- `GET /api/orders/{id}` - Get order details
-- `PUT /api/orders/{id}/status` - Update status (triggers consensus)
-- `POST /api/orders/{id}/cancel` - Cancel order (triggers consensus)
-- `GET /consensus/status` - Cluster health and quorum status
-- `GET /consensus/votes/{operation_id}` - View votes for operation
-
-#### 3. Product Service (Ports 8001-8011 rotating)
-**Purpose**: Product catalog with MTD
-
-**Key Features**:
-- Product CRUD operations
-- Stock management
-- MTD port rotation
-- Integration with Order Service consensus
-
-#### 4. Payment Service (Ports 8003-8013 rotating)
-**Purpose**: Payment processing with MTD
-
-**Key Features**:
-- Payment validation
-- Transaction processing
-- MTD port rotation
-- Secure credential handling
-
-#### 5. Email Service (Ports 25, 2525-2534 rotating)
-**Purpose**: Email notifications with MTD
-
-**Key Features**:
-- Order confirmations
-- Status update notifications
-- MTD port rotation
-
-#### 6. API Gateway (Ports 8080-8090 rotating)
-**Purpose**: Load balancing and routing with MTD
-
-**Key Features**:
-- Routes to Order Service cluster (round-robin)
-- Dynamic service discovery
-- MTD port rotation
-- Rate limiting
-- Health checks
-
-### Infrastructure Services
-
-#### 7. Prometheus (Port 9090)
-**Metrics Collected**:
-- `bft_consensus_proposals_total` - Consensus proposals
-- `bft_consensus_votes_total` - Votes cast (approved/rejected)
-- `bft_quorum_status` - Current quorum availability
-- `bft_node_health` - Node health status
-- `mtd_rotations_total` - Service rotations completed
-- `mtd_active_ports` - Current port allocations
-- `mtd_rotation_duration_seconds` - Rotation time
-
-#### 8. Grafana (Port 3000)
-**Dashboards**:
-- BFT Consensus Monitoring
-- MTD Rotation Status
-- Service Health Overview
-- Order Processing Metrics
-
-#### 9. Wazuh (Port 443)
-**Custom Rules**:
-- Byzantine behavior detection
-- Vote discrepancy alerts
-- Quorum loss warnings
-- Rotation anomalies
-- Service impersonation attempts
-
-#### 10. HashiCorp Vault (Port 8200)
-**Purpose**: Distributed secret management
-
-**Key Features**:
-- Service authentication tokens
-- Database credentials
-- API keys rotation
-- Encryption keys
-- Certificate management
-
----
-
 ## 🚀 Deployment
 
 ### Prerequisites
 
+**Option A: With Nix Flakes (Recommended)**
+```bash
+# Nix with flakes enabled
+nix --version  # Should be 2.4+
+
+# Enable flakes in ~/.config/nix/nix.conf:
+experimental-features = nix-command flakes
+```
+
+**Option B: With Docker**
 ```bash
 # System Requirements
 - Docker 20.10+
@@ -381,7 +271,56 @@ This project implements **Attack Tolerance Mechanisms** for a scalable e-commerc
 - 9090         (Prometheus)
 ```
 
-### Quick Start
+---
+
+### Quick Start with Nix (Recommended)
+
+```bash
+# Clone repository
+git clone https://github.com/luis-godinho/ssle_project2.git
+cd ssle_project2
+
+# Enter development environment (installs all tools)
+nix develop
+
+# You'll see:
+# 🛡️  SSLE Project 2 - Attack Tolerance Mechanisms
+# =================================================
+# 
+# 📚 Available commands:
+#   start-project    - Start all Docker containers
+#   stop-project     - Stop all containers
+#   check-cluster    - Check cluster health
+#   test-bft         - Test Byzantine Fault Tolerance
+#   test-mtd         - Test Moving Target Defense
+#   run-tests        - Run full test suite
+
+# Start everything
+start-project
+
+# Check health
+check-cluster
+
+# Test BFT
+test-bft
+
+# Test MTD
+test-mtd
+```
+
+**What the Nix shell provides:**
+- ✅ Docker & Docker Compose
+- ✅ Python 3.11 with all dependencies
+- ✅ curl, jq, netcat, nmap
+- ✅ Custom testing scripts
+- ✅ Automated cluster management
+- ✅ No manual installation needed!
+
+**See [TESTING_GUIDE.md](TESTING_GUIDE.md) for comprehensive testing instructions.**
+
+---
+
+### Quick Start with Docker
 
 ```bash
 # Clone repository
@@ -441,6 +380,21 @@ curl http://localhost:5000/services
 
 ## 🧪 Testing & Validation
 
+> **📖 Full testing guide available**: See [TESTING_GUIDE.md](TESTING_GUIDE.md) for comprehensive testing instructions with Nix.
+
+### Quick Test Commands (with Nix)
+
+```bash
+# Inside nix develop shell:
+
+test-bft      # Test Byzantine Fault Tolerance
+test-mtd      # Test Moving Target Defense
+run-tests     # Run full test suite
+check-cluster # Check cluster health
+```
+
+### Manual Testing
+
 ### Test 1: Byzantine Fault Tolerance
 
 #### Scenario 1.1: Node Crash Tolerance
@@ -457,10 +411,7 @@ curl -X POST http://localhost:8080/proxy/order-service/api/orders \
   }'
 
 # Expected: Order created successfully
-# Verify: Check consensus votes
-curl http://localhost:8002/consensus/votes/{operation_id}
-
-# Result: 2/3 nodes voted, operation committed
+# Result: 2/3 nodes voted, operation committed ✅
 ```
 
 #### Scenario 1.2: Byzantine Node Behavior
@@ -468,31 +419,8 @@ curl http://localhost:8002/consensus/votes/{operation_id}
 # Inject false data via one node
 ./scripts/inject-byzantine-fault.sh order-node-3
 
-# Attempt order creation
-curl -X POST http://localhost:8080/proxy/order-service/api/orders \
-  -H "Content-Type: application/json" \
-  -d '{"customer_id": "CUST002", "items": [...]}'
-
 # Expected: Order rejected due to vote disagreement
-# Verify: Check Wazuh alerts
-# Alert: "Byzantine behavior detected: Node order-node-3 vote mismatch"
-```
-
-#### Scenario 1.3: Network Partition
-```bash
-# Create network partition
-./scripts/create-partition.sh order-node-3
-
-# Verify majority partition continues
-curl http://localhost:8002/consensus/status
-# Result: 2/3 nodes healthy, quorum available
-
-# Heal partition
-./scripts/heal-partition.sh order-node-3
-
-# Verify node catches up
-curl http://localhost:8022/consensus/status
-# Result: Node synchronized with cluster
+# Wazuh Alert: "Byzantine behavior detected" ✅
 ```
 
 ### Test 2: Moving Target Defense
@@ -508,67 +436,37 @@ curl http://localhost:5000/discover/product-service
 
 # Monitor service location after rotation
 curl http://localhost:5000/discover/product-service
-# Result: {"url": "http://product-service:8007"}
+# Result: {"url": "http://product-service:8007"} ✅
 
 # Verify requests still work
 curl http://localhost:8080/proxy/product-service/api/products
-# Result: Products returned successfully
+# Result: Products returned successfully ✅
 ```
 
 #### Scenario 2.2: Attack Surface Validation
 ```bash
 # Scan ports before MTD
 nmap -p 8000-8100 localhost
-# Result: 5 open ports (fixed endpoints)
+# Result: 5 open ports
 
-# Enable MTD and wait 10 minutes
+# Wait 10 minutes for rotations
 
 # Scan ports after MTD
 nmap -p 8000-8100 localhost
-# Result: Different 5 open ports (rotated endpoints)
-
-# Compare scans
-./scripts/compare-port-scans.sh
-# Result: 0% overlap in active ports
-```
-
-#### Scenario 2.3: Zero-Downtime Rotation
-```bash
-# Generate continuous load
-ab -n 10000 -c 10 http://localhost:8080/proxy/product-service/api/products &
-
-# Trigger rotation during load
-./scripts/trigger-rotation.sh product-service
-
-# Check request success rate
-# Expected: >99.9% success rate (no dropped requests)
-```
-
-### Test 3: Combined Tolerance
-
-#### Scenario 3.1: BFT + MTD Under Attack
-```bash
-# Start attack simulation
-./scripts/simulate-attack.sh
-
-# Attack includes:
-# - DDoS on known ports
-# - Byzantine node compromise attempt
-# - Network disruption
-
-# Monitor system response:
-# 1. MTD rotates endpoints (attack follows old ports)
-# 2. BFT cluster maintains quorum (Byzantine node isolated)
-# 3. Orders continue processing
-
-# Verify metrics
-curl http://localhost:9090/api/v1/query?query=bft_consensus_success_rate
-# Expected: >95% success rate
+# Result: Different 5 open ports ✅
+# Attacker's reconnaissance is now stale!
 ```
 
 ---
 
 ## 📊 Monitoring & Evaluation
+
+### Access Monitoring Dashboards
+
+- **Prometheus**: http://localhost:9090
+- **Grafana**: http://localhost:3000 (admin/admin)
+- **Wazuh**: https://localhost:443
+- **Service Registry**: http://localhost:5000/services
 
 ### Prometheus Queries
 
@@ -582,14 +480,8 @@ bft_quorum_status
 # MTD Rotation Frequency
 rate(mtd_rotations_total[1h])
 
-# MTD Rotation Duration
-histogram_quantile(0.95, mtd_rotation_duration_seconds_bucket)
-
 # Order Processing Latency (with BFT overhead)
 histogram_quantile(0.95, order_processing_duration_seconds_bucket)
-
-# Service Availability (with MTD)
-avg_over_time(up{job="services"}[5m])
 ```
 
 ### Grafana Dashboards
@@ -597,58 +489,25 @@ avg_over_time(up{job="services"}[5m])
 1. **BFT Consensus Dashboard**
    - Cluster health status
    - Vote statistics
-   - Quorum availability timeline
-   - Node synchronization lag
+   - Quorum availability
    - Byzantine behavior alerts
 
 2. **MTD Operations Dashboard**
-   - Active port allocations
-   - Rotation timeline
+   - Port rotations over time
    - Service location map
-   - Rotation duration histogram
-   - Failed rotation count
+   - Rotation duration
 
 3. **System Performance Dashboard**
-   - Request latency (with BFT/MTD overhead)
+   - Request latency (BFT/MTD overhead)
    - Throughput
    - Error rates
-   - Resource utilization
 
-### Wazuh Rules
+### Wazuh Custom Rules
 
-```xml
-<!-- Byzantine Behavior Detection -->
-<rule id="100200" level="12">
-  <if_sid>100000</if_sid>
-  <match>vote_mismatch</match>
-  <description>Byzantine fault detected: Vote mismatch in consensus</description>
-  <group>bft,attack_tolerance</group>
-</rule>
-
-<!-- Quorum Loss Alert -->
-<rule id="100201" level="14">
-  <if_sid>100000</if_sid>
-  <match>quorum_lost</match>
-  <description>Critical: BFT quorum lost - only $(nodes) nodes available</description>
-  <group>bft,attack_tolerance,critical</group>
-</rule>
-
-<!-- MTD Rotation Anomaly -->
-<rule id="100210" level="8">
-  <if_sid>100000</if_sid>
-  <match>rotation_failed</match>
-  <description>MTD rotation failed for $(service)</description>
-  <group>mtd,attack_tolerance</group>
-</rule>
-
-<!-- Service Impersonation Attempt -->
-<rule id="100211" level="12">
-  <if_sid>100000</if_sid>
-  <match>invalid_service_port</match>
-  <description>Potential service impersonation: Request to non-registered port</description>
-  <group>mtd,attack_tolerance</group>
-</rule>
-```
+- **Rule 100200**: Byzantine behavior detected
+- **Rule 100201**: BFT quorum lost (Critical)
+- **Rule 100210**: MTD rotation anomaly
+- **Rule 100211**: Service impersonation attempt
 
 ---
 
@@ -697,84 +556,13 @@ docker-compose -f docker-compose.integrated.yml up -d
 
 ---
 
-## 📝 Report Structure
+## 📚 Documentation Files
 
-The full report follows the required structure:
-
-1. **Introduction**
-   - Project objectives
-   - Attack tolerance importance
-   - Chosen mechanisms rationale
-
-2. **Service Architecture**
-   - E-commerce platform description
-   - Microservices design
-   - Service discovery pattern
-   - Scalability considerations
-
-3. **Risk Management and Mitigation**
-   - Byzantine faults analysis
-   - Reconnaissance attacks analysis
-   - Attack surfaces
-   - Mitigation strategies
-
-4. **Byzantine Fault Tolerance Approach**
-   - Consensus protocol design
-   - State machine replication
-   - Quorum requirements
-   - Implementation details
-
-5. **Moving Target Defense Approach**
-   - Port rotation strategy
-   - Dynamic service discovery
-   - Zero-downtime migration
-   - Implementation details
-
-6. **Evaluation**
-   - Performance metrics
-   - Scalability testing
-   - Fault injection results
-   - Attack simulation results
-   - Overhead analysis
-
-7. **Conclusions**
-   - Effectiveness summary
-   - Limitations and trade-offs
-   - Future improvements
-   - Integration possibilities
-
----
-
-## 🎥 Demo Video
-
-**Demo Strategy** (as per project requirements):
-
-1. **Explain Byzantine Faults**
-   - What: Arbitrary node failures/malicious behavior
-   - Why relevant: Financial system integrity
-   - How exploited: Compromised nodes, network attacks
-
-2. **Demonstrate BFT**
-   - Show consensus voting
-   - Stop one node → system continues
-   - Inject false data → rejected by majority
-   - Show Wazuh alerts for Byzantine behavior
-
-3. **Explain Reconnaissance Attacks**
-   - What: Mapping system architecture
-   - Why relevant: Enables targeted attacks
-   - How exploited: Port scanning, service enumeration
-
-4. **Demonstrate MTD**
-   - Show port rotation over time
-   - Port scan before/after rotation
-   - Requests continue working (via Registry)
-   - Show attacker confusion (old ports dead)
-
-5. **Combined Attack Scenario**
-   - Simultaneous Byzantine + reconnaissance
-   - System maintains operation
-   - Show metrics and alerts
+- **[README.md](README.md)** - This file (project overview)
+- **[TESTING_GUIDE.md](TESTING_GUIDE.md)** - Comprehensive testing guide with Nix
+- **[IMPLEMENTATION_GUIDE.md](IMPLEMENTATION_GUIDE.md)** - Code implementation details
+- **[PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)** - Quick reference and checklist
+- **[flake.nix](flake.nix)** - Nix development environment
 
 ---
 
@@ -782,77 +570,27 @@ The full report follows the required structure:
 
 ```
 ssle_project2/
+├── flake.nix                   # Nix development environment ⭐ NEW
+├── TESTING_GUIDE.md            # Comprehensive testing guide ⭐ NEW
+├── IMPLEMENTATION_GUIDE.md     # Code implementation details
+├── PROJECT_SUMMARY.md          # Quick reference
+├── docker-compose.yml          # Main deployment
 ├── services/
-│   ├── registry/                # Service Registry (MTD coordinator)
-│   │   ├── app.py              # Registry with port allocation
-│   │   ├── Dockerfile
-│   │   └── requirements.txt
-│   │
-│   ├── order-service/          # BFT Order Service Cluster
-│   │   ├── app.py              # Consensus implementation
-│   │   ├── consensus.py        # BFT consensus protocol
-│   │   ├── state_machine.py    # Replicated state machine
-│   │   ├── Dockerfile
-│   │   └── requirements.txt
-│   │
-│   ├── product-service/        # Product Service (MTD)
-│   │   ├── app.py              # Product API with rotation
-│   │   ├── mtd_client.py       # MTD rotation client
-│   │   ├── Dockerfile
-│   │   └── requirements.txt
-│   │
-│   ├── payment-service/        # Payment Service (MTD)
-│   ├── email-service/          # Email Service (MTD)
-│   ├── api-gateway/            # API Gateway (MTD + Load Balancer)
-│   └── web-service/            # Web Frontend
-│
+│   ├── registry/               # Service Registry (MTD)
+│   ├── order-service/          # BFT cluster (3 nodes)
+│   ├── product-service/        # Product API (MTD)
+│   ├── payment-service/        # Payment API (MTD)
+│   ├── email-service/          # Email service (MTD)
+│   ├── api-gateway/            # Load balancer (MTD)
+│   └── web-service/            # Frontend
 ├── monitoring/
 │   ├── prometheus/
-│   │   ├── prometheus.yml      # Scrape configs
-│   │   ├── alerts.yml          # BFT/MTD alerts
-│   │   └── rules.yml
-│   │
 │   ├── grafana/
-│   │   ├── dashboards/
-│   │   │   ├── bft-consensus.json
-│   │   │   ├── mtd-operations.json
-│   │   │   └── system-performance.json
-│   │   └── provisioning/
-│   │
-│   └── wazuh/
-│       ├── custom_rules.xml    # BFT/MTD rules
-│       └── decoders/
-│
+│   └── alertmanager/
+├── wazuh/
+│   └── custom_rules.xml
 ├── vault/
-│   ├── config.hcl              # Vault configuration
-│   └── policies/               # Access policies
-│
-├── scripts/
-│   ├── init-vault.sh           # Initialize Vault
-│   ├── check-cluster.sh        # BFT cluster health
-│   ├── trigger-rotation.sh     # Manual MTD rotation
-│   ├── inject-byzantine-fault.sh
-│   ├── simulate-attack.sh
-│   └── create-partition.sh
-│
-├── tests/
-│   ├── test_bft.py             # BFT unit tests
-│   ├── test_mtd.py             # MTD unit tests
-│   └── integration/
-│       ├── test_order_creation.py
-│       └── test_fault_tolerance.py
-│
-├── report/
-│   ├── main.tex                # LaTeX report
-│   ├── sections/
-│   ├── figures/
-│   └── references.bib
-│
-├── docker-compose.yml          # Main deployment
-├── docker-compose.integrated.yml # With Project 1
-├── .env.example
-├── .gitignore
-└── README.md                   # This file
+└── scripts/
 ```
 
 ---
