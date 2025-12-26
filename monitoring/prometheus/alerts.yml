@@ -1,0 +1,123 @@
+# Alert rules for SSLE project
+
+groups:
+  - name: service_availability
+    interval: 30s
+    rules:
+      # Service down alerts
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "{{ $labels.job }} has been down for more than 1 minute."
+
+      # High error rate
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          category: errors
+        annotations:
+          summary: "High error rate on {{ $labels.job }}"
+          description: "Error rate is {{ $value }} errors per second."
+
+  - name: ddos_detection
+    interval: 10s
+    rules:
+      # High request rate (potential DDoS)
+      - alert: HighRequestRate
+        expr: increase(api_gateway_requests_total[1m]) > 100
+        for: 10s
+        labels:
+          severity: warning
+          category: ddos
+        annotations:
+          summary: "High request rate detected"
+          description: "Request rate is {{ $value }} requests per second, potential DDoS attack."
+
+      # Many blocked IPs
+      - alert: ManyBlockedIPs
+        expr: api_gateway_blocked_ips > 10
+        for: 1m
+        labels:
+          severity: warning
+          category: ddos
+        annotations:
+          summary: "Many IPs blocked"
+          description: "{{ $value }} IPs are currently blocked, indicating potential DDoS attack."
+
+      # Slow response time
+      - alert: SlowResponseTime
+        expr: api_gateway_response_time_seconds > 2
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Slow response times"
+          description: "Average response time is {{ $value }} seconds, service may be under attack."
+
+  - name: resource_usage
+    interval: 30s
+    rules:
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is {{ $value }}%."
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is {{ $value }}%."
+
+      # Disk space low
+      - alert: LowDiskSpace
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 15
+        for: 5m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Only {{ $value }}% disk space available."
+
+  - name: security_events
+    interval: 15s
+    rules:
+      # Multiple failed authentication attempts
+      - alert: FailedAuthAttempts
+        expr: rate(failed_auth_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "Multiple failed authentication attempts"
+          description: "{{ $value }} failed authentication attempts per second."
+
+      # Shellshock attack detected (would need custom exporter)
+      - alert: ShellshockDetected
+        expr: increase(shellshock_attacks_total[5m]) > 0
+        labels:
+          severity: critical
+          category: security
+        annotations:
+          summary: "Shellshock attack detected"
+          description: "{{ $value }} Shellshock attacks detected in the last 5 minutes."

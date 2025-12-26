@@ -10,7 +10,7 @@ services:
       - "5000:5000"
     environment:
       - MTD_ENABLED=true
-      - ROTATION_INTERVAL=300  # 5 minutes
+      - ROTATION_INTERVAL=300 # 5 minutes
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
@@ -21,14 +21,14 @@ services:
       - ecommerce-network
 
   # ==================== ORDER SERVICE BFT CLUSTER ====================
-  
+
   # Order Service Node 1 (Primary)
   order-node-1:
     build: ./services/order-service
     container_name: order-node-1
     hostname: order1.ecommerce.local
     ports:
-      - "8002:8002"
+      - "8102:8002"
     environment:
       - REGISTRY_URL=http://registry:5000
       - SERVICE_NAME=order-service
@@ -53,7 +53,7 @@ services:
     container_name: order-node-2
     hostname: order2.ecommerce.local
     ports:
-      - "8012:8012"
+      - "8112:8012"
     environment:
       - REGISTRY_URL=http://registry:5000
       - SERVICE_NAME=order-service
@@ -78,7 +78,7 @@ services:
     container_name: order-node-3
     hostname: order3.ecommerce.local
     ports:
-      - "8022:8022"
+      - "8122:8022"
     environment:
       - REGISTRY_URL=http://registry:5000
       - SERVICE_NAME=order-service
@@ -105,7 +105,7 @@ services:
     container_name: product-service
     hostname: product.ecommerce.local
     ports:
-      - "8001-8011:8001-8011"  # MTD port range
+      - "8001-8011:8001-8011" # MTD port range
     environment:
       - REGISTRY_URL=http://registry:5000
       - SERVICE_NAME=product-service
@@ -129,7 +129,7 @@ services:
     container_name: payment-service
     hostname: payment.ecommerce.local
     ports:
-      - "8003-8013:8003-8013"  # MTD port range
+      - "8012-8022:8012-8022" # MTD port range
     environment:
       - REGISTRY_URL=http://registry:5000
       - SERVICE_NAME=payment-service
@@ -153,9 +153,9 @@ services:
     container_name: email-service
     hostname: email.ecommerce.local
     ports:
-      - "25:25"          # SMTP primary
-      - "2525-2534:2525-2534"  # MTD port range
-      - "143:143"        # IMAP
+      - "25:25" # SMTP primary
+      - "2525-2534:2525-2534" # MTD port range
+      - "143:143" # IMAP
     environment:
       - REGISTRY_URL=http://registry:5000
       - SERVICE_NAME=email-service
@@ -184,7 +184,7 @@ services:
     container_name: api-gateway
     hostname: gateway.ecommerce.local
     ports:
-      - "8080-8090:8080-8090"  # MTD port range
+      - "8080-8090:8080-8090" # MTD port range
     cap_add:
       - NET_ADMIN
     environment:
@@ -196,7 +196,7 @@ services:
       - ROTATION_INTERVAL=300
       - RATE_LIMIT_REQUESTS=100
       - RATE_LIMIT_WINDOW=60
-      - BFT_LOAD_BALANCE=true  # Round-robin to order cluster
+      - BFT_LOAD_BALANCE=true # Round-robin to order cluster
       - WAZUH_MANAGER=wazuh.manager
       - VAULT_ADDR=http://vault:8200
     depends_on:

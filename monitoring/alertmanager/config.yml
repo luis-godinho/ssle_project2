@@ -1,0 +1,63 @@
+# Alertmanager configuration
+
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: 'localhost:25'
+  smtp_from: 'alertmanager@ssle.local'
+
+# Route configuration
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'default'
+  routes:
+    # Critical alerts
+    - match:
+        severity: critical
+      receiver: 'critical'
+      continue: true
+
+    # DDoS alerts
+    - match:
+        category: ddos
+      receiver: 'ddos-team'
+      continue: true
+
+    # Security alerts
+    - match:
+        category: security
+      receiver: 'security-team'
+      continue: true
+
+# Receivers
+receivers:
+  - name: 'default'
+    webhook_configs:
+      - url: 'http://localhost:5001/webhook'
+        send_resolved: true
+
+  - name: 'critical'
+    webhook_configs:
+      - url: 'http://localhost:5001/webhook/critical'
+        send_resolved: true
+
+  - name: 'ddos-team'
+    webhook_configs:
+      - url: 'http://localhost:5001/webhook/ddos'
+        send_resolved: true
+
+  - name: 'security-team'
+    webhook_configs:
+      - url: 'http://localhost:5001/webhook/security'
+        send_resolved: true
+
+# Inhibition rules
+inhibit_rules:
+  # Inhibit warning if critical is firing
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'cluster', 'service']
