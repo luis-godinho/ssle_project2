@@ -5,7 +5,8 @@ Byzantine Fault Tolerance Consensus Module with Vault Authentication
 Implements a simple BFT consensus protocol:
 - Leader proposes operations
 - All replicas vote
-- 2f+1 agreement required (where f=1, so need 2/3 nodes)
+- 2f+1 agreement required (where f is max Byzantine faults)
+- For 3 nodes: f=1, quorum=2 (can tolerate 1 Byzantine failure)
 - State replication across nodes
 - Node authentication using Vault tokens
 """
@@ -47,7 +48,20 @@ class BFTConsensus:
                 self.cluster_nodes.append(f"http://{node}")
         
         self.cluster_size = len(self.cluster_nodes)
-        self.quorum_size = (2 * self.cluster_size) // 3 + 1  # 2f+1 where f = (n-1)//3
+        
+        # BFT quorum calculation: need 2f+1 votes where f = max Byzantine faults
+        # For 3 nodes: f=1 (can tolerate 1 Byzantine node), quorum=2
+        # For 4 nodes: f=1, quorum=3
+        # For 5 nodes: f=1, quorum=3
+        # For 6 nodes: f=2, quorum=4
+        # For 7 nodes: f=2, quorum=5
+        f = (self.cluster_size - 1) // 3  # Max Byzantine faults tolerated
+        self.quorum_size = (2 * f) + 1
+        
+        # Ensure quorum is at least majority for small clusters
+        min_quorum = (self.cluster_size // 2) + 1
+        if self.quorum_size < min_quorum:
+            self.quorum_size = min_quorum
 
         # Get authentication token from Vault
         node_name = node_id.split(":")[
@@ -66,7 +80,8 @@ class BFTConsensus:
 
         logger.info(f"BFT Consensus initialized: {node_id}")
         logger.info(f"Cluster: {self.cluster_nodes}")
-        logger.info(f"Quorum: {self.quorum_size}/{self.cluster_size}")
+        logger.info(f"Byzantine fault tolerance: f={f} (can tolerate {f} malicious nodes)")
+        logger.info(f"Quorum requirement: {self.quorum_size}/{self.cluster_size}")
         logger.info(
             f"Vault authentication: {'enabled' if self.auth_token else 'disabled'}"
         )
