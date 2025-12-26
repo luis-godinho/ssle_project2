@@ -33,11 +33,20 @@ class BFTConsensus:
 
         Args:
             node_id: This node's identifier (e.g., "order-node-1:8002")
-            cluster_nodes: List of all cluster node URLs
+            cluster_nodes: List of all cluster nodes (hostname:port or URLs)
         """
         self.node_id = node_id
-        self.cluster_nodes = cluster_nodes
-        self.cluster_size = len(cluster_nodes)
+        
+        # Normalize cluster nodes to full URLs
+        self.cluster_nodes = []
+        for node in cluster_nodes:
+            if node.startswith('http://') or node.startswith('https://'):
+                self.cluster_nodes.append(node)
+            else:
+                # Add http:// prefix if missing
+                self.cluster_nodes.append(f"http://{node}")
+        
+        self.cluster_size = len(self.cluster_nodes)
         self.quorum_size = (2 * self.cluster_size) // 3 + 1  # 2f+1 where f = (n-1)//3
 
         # Get authentication token from Vault
@@ -56,7 +65,7 @@ class BFTConsensus:
         self.operations_lock = Lock()
 
         logger.info(f"BFT Consensus initialized: {node_id}")
-        logger.info(f"Cluster: {cluster_nodes}")
+        logger.info(f"Cluster: {self.cluster_nodes}")
         logger.info(f"Quorum: {self.quorum_size}/{self.cluster_size}")
         logger.info(
             f"Vault authentication: {'enabled' if self.auth_token else 'disabled'}"
@@ -350,11 +359,16 @@ class BFTConsensus:
                 response = requests.get(f"{node_url}/health", timeout=2)
                 if response.status_code == 200:
                     healthy_nodes += 1
-                    node_statuses.append({"node": node_url, "status": "healthy"})
+                    # Extract just hostname:port for display
+                    display_name = node_url.replace('http://', '').replace('https://', '')
+                    node_statuses.append({"node": display_name, "status": "healthy"})
                 else:
-                    node_statuses.append({"node": node_url, "status": "unhealthy"})
-            except:
-                node_statuses.append({"node": node_url, "status": "unreachable"})
+                    display_name = node_url.replace('http://', '').replace('https://', '')
+                    node_statuses.append({"node": display_name, "status": "unhealthy"})
+            except Exception as e:
+                display_name = node_url.replace('http://', '').replace('https://', '')
+                node_statuses.append({"node": display_name, "status": "unreachable"})
+                logger.debug(f"Health check failed for {display_name}: {e}")
 
         quorum_available = healthy_nodes >= self.quorum_size
 
