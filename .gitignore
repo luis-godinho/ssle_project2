@@ -16,19 +16,7 @@
 .DS_Store
 
 # Docker
-docker-compose.override.yml
-.docker/
-
-# Node modules
-node_modules/
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.egg-info/
-.venv/
-venv/
+.dockerignore
 
 # Logs
 *.log
