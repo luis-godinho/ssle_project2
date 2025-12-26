@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Order Service with Byzantine Fault Tolerance (BFT)
+Order Service with Byzantine Fault Tolerance (BFT) and Vault Authentication
 
 Features:
 - 3-node consensus cluster
 - BFT consensus for order operations
 - State replication
 - Quorum-based decision making
+- Vault-based node authentication
 """
 
 import json
@@ -61,6 +62,7 @@ def health():
         "status": "healthy",
         "node": NODE_ID,
         "port": NODE_PORT,
+        "vault_auth": bool(consensus.auth_token),
         "timestamp": time.time(),
     }), 200
 
@@ -108,6 +110,7 @@ def create_order():
         "created_at": datetime.now().isoformat(),
         "created_by": NODE_ID,
         "consensus_operation_id": result["operation_id"],
+        "authenticated_votes": result["approved"],
     }
     
     orders[order_id] = order
@@ -174,15 +177,15 @@ def update_order_status(order_id):
 
 @app.route("/consensus/vote", methods=["POST"])
 def vote_on_operation():
-    """Vote on a proposed operation"""
+    """Vote on a proposed operation (with signature)"""
     data = request.get_json()
     
     required = ["operation_id", "operation_type", "operation_data", "proposer"]
     if not all(field in data for field in required):
         return jsonify({"error": "Missing required fields"}), 400
     
-    # Validate and vote
-    vote = consensus.validate_and_vote(
+    # Validate and vote (returns tuple: vote, signature)
+    vote, signature = consensus.validate_and_vote(
         data["operation_id"],
         data["operation_type"],
         data["operation_data"],
@@ -192,6 +195,7 @@ def vote_on_operation():
     return jsonify({
         "node": f"{NODE_ID}:{NODE_PORT}",
         "vote": vote,
+        "signature": signature,
         "operation_id": data["operation_id"],
     }), 200
 
@@ -220,5 +224,6 @@ if __name__ == "__main__":
     logger.info(f"Port: {NODE_PORT}")
     logger.info(f"Cluster nodes: {CLUSTER_NODES}")
     logger.info(f"Quorum requirement: {consensus.quorum_size}/{consensus.cluster_size}")
+    logger.info(f"Vault authentication: {'enabled' if consensus.auth_token else 'disabled'}")
     
     app.run(host="0.0.0.0", port=NODE_PORT, debug=False)
