@@ -14,17 +14,21 @@ import hashlib
 import hmac
 import json
 import logging
-import os
-import sys
 import time
 from threading import Lock
 from typing import Dict, List, Optional
 
 import requests
 
-# Add parent directory to path for vault_client import
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from vault_client import vault_client
+# Import vault client (copied into /app/ by Dockerfile)
+try:
+    from vault_client import vault_client
+except ImportError:
+    # Graceful fallback if vault_client not available
+    class DummyVaultClient:
+        def get_bft_node_token(self, node_name):
+            return None
+    vault_client = DummyVaultClient()
 
 logger = logging.getLogger(__name__)
 
