@@ -10,6 +10,7 @@ Features:
 - Service location tracking
 - Load balancing for BFT clusters (round-robin)
 - Deadlock-free rotation (lock released before response)
+- Non-HTTP service support (SMTP, etc.)
 """
 
 import json
@@ -99,11 +100,12 @@ def register():
     port = data["port"]
     host = data.get("host", service_name)
     metadata = data.get("metadata", {})
+    protocol = metadata.get("protocol", "http")  # Default to HTTP
 
     with services_lock:
         services[service_name] = {
             "service_name": service_name,
-            "url": f"http://{host}:{port}",
+            "url": f"http://{host}:{port}" if protocol == "http" else f"{protocol}://{host}:{port}",
             "port": port,
             "host": host,
             "healthy": True,
@@ -111,14 +113,17 @@ def register():
             "rotation_count": services.get(service_name, {}).get("rotation_count", 0),
             "registered_at": datetime.now().isoformat(),
             "metadata": metadata,
+            "protocol": protocol,
         }
         registry_services_total.set(len(services))
 
-    logger.info(f"Registered service: {service_name} at {host}:{port}")
+    logger.info(f"✅ Registered service: {service_name} at {host}:{port} (protocol: {protocol})")
     if metadata.get("type") == "bft-cluster-member":
         logger.info(
             f"  BFT cluster member: {metadata.get('node_id')} (role: {metadata.get('node_role')})"
         )
+    elif protocol != "http":
+        logger.info(f"  Non-HTTP service: {protocol.upper()} - health checks disabled")
 
     return jsonify({"status": "registered", "service": service_name, "port": port}), 200
 
@@ -247,11 +252,21 @@ def rotate(service_name):
     """
     Trigger port rotation for a service.
     Now actively triggers the service to rotate via its /rotate endpoint.
+    Skips rotation callback for non-HTTP services (SMTP, etc.)
     """
     # Allocate new port and update state INSIDE lock
     with services_lock:
         if service_name not in services:
             return jsonify({"error": f"Service {service_name} not found"}), 404
+
+        # Check if service supports HTTP rotation
+        protocol = services[service_name].get("protocol", "http")
+        
+        if protocol != "http":
+            return jsonify({
+                "error": f"Service {service_name} uses {protocol.upper()} protocol and does not support MTD rotation",
+                "protocol": protocol
+            }), 400
 
         # Get current port
         current_port = services[service_name]["port"]
@@ -271,7 +286,7 @@ def rotate(service_name):
 
         # Log inside lock
         logger.info(
-            f"Rotation requested for {service_name}: {current_port} -> {new_port}"
+            f"🔄 Rotation requested for {service_name}: {current_port} -> {new_port}"
         )
 
         # Prepare response data
@@ -365,16 +380,17 @@ def health_checker():
                 if current_time - info["last_heartbeat"] > HEALTH_TIMEOUT:
                     if info["healthy"]:
                         logger.warning(
-                            f"Service {name} marked unhealthy (no heartbeat for {HEALTH_TIMEOUT}s)"
+                            f"⚠️ Service {name} marked unhealthy (no heartbeat for {HEALTH_TIMEOUT}s)"
                         )
                         info["healthy"] = False
 
 
 if __name__ == "__main__":
-    logger.info("Service Registry starting...")
-    logger.info(f"Port ranges configured: {PORT_RANGES}")
-    logger.info("Load balancing enabled for BFT clusters")
-    logger.info("Deadlock-free rotation enabled")
+    logger.info("🚀 Service Registry starting...")
+    logger.info(f"📋 Port ranges configured: {PORT_RANGES}")
+    logger.info("⚖️  Load balancing enabled for BFT clusters")
+    logger.info("🔓 Deadlock-free rotation enabled")
+    logger.info("📧 Non-HTTP service support enabled (SMTP, etc.)")
 
     # Start health checker thread
     health_thread = Thread(target=health_checker, daemon=True)
