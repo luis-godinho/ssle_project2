@@ -4,6 +4,7 @@ import time
 import requests
 import logging
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 REGISTRY_URL = os.environ.get("REGISTRY_URL", "http://registry:5000")
@@ -14,7 +15,6 @@ HEARTBEAT_INTERVAL = 30
 
 
 def register_service():
-    service_url = f"http://{SERVICE_HOST}:{SERVICE_PORT}"
     registered = False
     retry_count = 0
     max_retries = 10
@@ -25,10 +25,10 @@ def register_service():
                 f"{REGISTRY_URL}/register",
                 json={
                     "name": SERVICE_NAME,
-                    "url": service_url,
-                    "health_endpoint": "/health",
+                    "port": int(SERVICE_PORT),
                     "metadata": {
                         "type": "backend-service",
+                        "protocol": "http",
                         "version": "1.0.0"
                     }
                 },
@@ -36,16 +36,23 @@ def register_service():
             )
             
             if response.status_code in [200, 201]:
-                logger.info(f"Successfully registered {SERVICE_NAME} at {service_url}")
+                logger.info(f"✅ Successfully registered {SERVICE_NAME} at port {SERVICE_PORT}")
                 registered = True
             else:
+                logger.warning(f"⚠️  Registration attempt {retry_count + 1} failed: {response.status_code}")
                 retry_count += 1
                 time.sleep(5)
         except Exception as e:
-            logger.error(f"Error registering service: {e}")
+            logger.error(f"❌ Error registering service: {e}")
             retry_count += 1
             time.sleep(5)
     
+    if not registered:
+        logger.error(f"❌ Failed to register after {max_retries} attempts")
+        return
+    
+    # Heartbeat loop
+    logger.info("💓 Starting heartbeat thread...")
     while True:
         try:
             time.sleep(HEARTBEAT_INTERVAL)
@@ -54,9 +61,11 @@ def register_service():
                 timeout=5
             )
             if response.status_code != 200:
-                logger.warning(f"Heartbeat failed: {response.status_code}")
+                logger.warning(f"⚠️  Heartbeat failed: {response.status_code}")
+            else:
+                logger.debug("💓 Heartbeat sent successfully")
         except Exception as e:
-            logger.error(f"Error sending heartbeat: {e}")
+            logger.error(f"⚠️  Error sending heartbeat: {e}")
 
 
 if __name__ == "__main__":
