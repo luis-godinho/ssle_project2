@@ -26,7 +26,7 @@ echo ""
 
 # Test 2: Check cluster quorum and consensus status
 echo "Test 2: Checking BFT cluster consensus status..."
-response=$(curl -s http://localhost:8102/consensus/status || echo "ERROR")
+response=$(curl -s http://localhost:8080/proxy/order-service/consensus/status || echo "ERROR")
 
 if [[ "$response" == "ERROR" ]]; then
     echo -e "${RED}❌ Order service not reachable. Is docker-compose running?${NC}"
@@ -55,7 +55,7 @@ echo "Making 10 requests to observe round-robin distribution..."
 declare -A node_counts
 for i in {1..10}; do
     response=$(curl -s http://localhost:8080/proxy/order-service/health || echo "ERROR")
-    
+
     if [[ "$response" != "ERROR" ]]; then
         node=$(echo "$response" | jq -r '.node // "unknown"')
         node_counts[$node]=$((${node_counts[$node]:-0} + 1))
@@ -89,7 +89,7 @@ order_response=$(curl -s -X POST http://localhost:8080/proxy/order-service/api/o
         ]
     }' || echo "ERROR")
 
-if echo "$order_response" | jq -e '.order_id' > /dev/null 2>&1; then
+if echo "$order_response" | jq -e '.order_id' >/dev/null 2>&1; then
     order_id=$(echo "$order_response" | jq -r '.order_id')
     created_by=$(echo "$order_response" | jq -r '.created_by')
     auth_votes=$(echo "$order_response" | jq -r '.authenticated_votes // "N/A"')
@@ -108,7 +108,7 @@ docker stop order-node-2 2>/dev/null
 sleep 3
 
 echo "Checking cluster status with 2/3 nodes..."
-status_2of3=$(curl -s http://localhost:8102/consensus/status || echo "ERROR")
+status_2of3=$(curl -s http://localhost:8080/proxy/order-service/consensus/status || echo "ERROR")
 if [[ "$status_2of3" != "ERROR" ]]; then
     healthy_2of3=$(echo "$status_2of3" | jq -r '.healthy_nodes')
     quorum_2of3=$(echo "$status_2of3" | jq -r '.quorum_available')
@@ -127,7 +127,7 @@ order_response2=$(curl -s -X POST http://localhost:8080/proxy/order-service/api/
         ]
     }' || echo "ERROR")
 
-if echo "$order_response2" | jq -e '.order_id' > /dev/null 2>&1; then
+if echo "$order_response2" | jq -e '.order_id' >/dev/null 2>&1; then
     order_id2=$(echo "$order_response2" | jq -r '.order_id')
     votes=$(echo "$order_response2" | jq -r '.authenticated_votes // "N/A"')
     echo -e "${GREEN}✅ Order created with 2/3 quorum!${NC}"
@@ -158,7 +158,7 @@ order_response3=$(curl -s -X POST http://localhost:8102/api/orders \
         ]
     }' || echo "ERROR")
 
-if echo "$order_response3" | jq -e '.error' > /dev/null 2>&1; then
+if echo "$order_response3" | jq -e '.error' >/dev/null 2>&1; then
     echo -e "${GREEN}✅ Order correctly REJECTED (quorum not met)!${NC}"
     echo -e "${GREEN}🛡️  BFT safety mechanism WORKING!${NC}"
     error_msg=$(echo "$order_response3" | jq -r '.error')
@@ -228,7 +228,7 @@ echo "============================================"
 echo ""
 echo -e "${BLUE}📊 Test Results:${NC}"
 echo -e "  ${GREEN}✅ 3/3 consensus (full cluster)${NC}"
-if echo "$order_response2" | jq -e '.order_id' > /dev/null 2>&1; then
+if echo "$order_response2" | jq -e '.order_id' >/dev/null 2>&1; then
     echo -e "  ${GREEN}✅ 2/3 consensus (Byzantine fault tolerance)${NC}"
 else
     echo -e "  ${YELLOW}⚠️  2/3 consensus (needs verification)${NC}"
@@ -248,10 +248,4 @@ echo "  ✅ Safety guarantee (rejects requests without quorum)"
 echo "  ✅ Liveness guarantee (works with majority)"
 echo "  ✅ Load balancing across healthy nodes"
 echo "  ✅ Automatic failover and recovery"
-echo ""
-echo -e "${YELLOW}💡 Tips:${NC}"
-echo "  - Watch consensus logs: docker logs -f order-node-1"
-echo "  - Check node status: curl http://localhost:8102/consensus/status | jq"
-echo "  - View all orders: curl http://localhost:8080/proxy/order-service/api/orders | jq"
-echo "  - Monitor metrics: curl http://localhost:8102/metrics | grep consensus"
 echo ""

@@ -73,7 +73,7 @@ echo ""
 
 # Test 5: Trigger MTD rotation
 echo "Test 5: Triggering MTD rotation..."
-rotation=$(curl -s -X POST http://localhost:5000/rotate/product-service -H "Content-Type: application/json" || echo "ERROR")
+rotation=$(curl -s -X POST http://localhost:5000/rotate/product-service || echo "ERROR")
 
 if [[ "$rotation" == "ERROR" ]]; then
     echo -e "${RED}❌ Failed to trigger rotation${NC}"
@@ -170,7 +170,7 @@ echo "Test 10: Testing multiple rapid rotations..."
 for i in {1..3}; do
     echo "  Rotation $i/3..."
     rotation_multi=$(curl -s -X POST http://localhost:5000/rotate/product-service -H "Content-Type: application/json" || echo "ERROR")
-    
+
     if [[ "$rotation_multi" != "ERROR" ]]; then
         multi_new=$(echo "$rotation_multi" | jq -r '.new_port')
         multi_count=$(echo "$rotation_multi" | jq -r '.rotation_count')
@@ -211,10 +211,4 @@ echo "  ✅ New port activation"
 echo "  ✅ Registry coordination"
 echo "  ✅ API Gateway discovery"
 echo "  ✅ Multiple rotation resilience"
-echo ""
-echo -e "${YELLOW}💡 Tips:${NC}"
-echo "  - Watch live rotations: docker logs -f product-service"
-echo "  - Check iptables: docker exec product-service iptables -t nat -L -n -v"
-echo "  - Monitor metrics: curl http://localhost:$final_port/metrics | grep mtd"
-echo "  - Service rotates automatically every 60 seconds"
 echo ""
