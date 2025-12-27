@@ -36,6 +36,7 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             docker
+            docker-compose
             pythonEnv
             curl
             jq
