@@ -38,14 +38,14 @@ echo "$response" | jq .
 
 # Extract quorum info
 quorum_size=$(echo "$response" | jq -r '.quorum_size')
-active_nodes=$(echo "$response" | jq -r '.active_nodes')
-cluster_healthy=$(echo "$response" | jq -r '.cluster_healthy')
+healthy_nodes=$(echo "$response" | jq -r '.healthy_nodes')
+quorum_available=$(echo "$response" | jq -r '.quorum_available')
 
 echo ""
 echo -e "${BLUE}Quorum Configuration:${NC}"
 echo "  - Required quorum: $quorum_size nodes"
-echo "  - Active nodes: $active_nodes"
-echo "  - Cluster healthy: $cluster_healthy"
+echo "  - Healthy nodes: $healthy_nodes"
+echo "  - Quorum available: $quorum_available"
 echo ""
 
 # Test 3: Verify load balancing via registry
@@ -57,16 +57,25 @@ for i in {1..10}; do
     response=$(curl -s http://localhost:8080/proxy/order-service/health || echo "ERROR")
     
     if [[ "$response" != "ERROR" ]]; then
-        node_id=$(echo "$response" | jq -r '.node_id // "unknown"')
-        node_counts[$node_id]=$((${node_counts[$node_id]:-0} + 1))
+        node=$(echo "$response" | jq -r '.node // "unknown"')
+        node_counts[$node]=$((${node_counts[$node]:-0} + 1))
     fi
     sleep 0.2
 done
 
 echo -e "${GREEN}Load distribution:${NC}"
 for node in "${!node_counts[@]}"; do
-    echo "  - $node: ${node_counts[$node]} requests"
+    count=${node_counts[$node]}
+    echo "  - $node: $count requests"
 done
+
+# Check if load is distributed
+total_nodes=${#node_counts[@]}
+if [[ $total_nodes -ge 2 ]]; then
+    echo -e "${GREEN}✅ Load balanced across $total_nodes nodes${NC}"
+else
+    echo -e "${YELLOW}⚠️  Load not distributed (only $total_nodes node(s) receiving traffic)${NC}"
+fi
 echo ""
 
 # Test 4: Create order with full cluster (3/3 consensus)
@@ -82,8 +91,10 @@ order_response=$(curl -s -X POST http://localhost:8080/proxy/order-service/api/o
 
 if echo "$order_response" | jq -e '.order_id' > /dev/null 2>&1; then
     order_id=$(echo "$order_response" | jq -r '.order_id')
-    echo -e "${GREEN}✅ Order created successfully with 3/3 consensus:${NC}"
-    echo "$order_response" | jq '{order_id, status, consensus_achieved, nodes_agreed}'
+    created_by=$(echo "$order_response" | jq -r '.created_by')
+    auth_votes=$(echo "$order_response" | jq -r '.authenticated_votes // "N/A"')
+    echo -e "${GREEN}✅ Order created successfully with full cluster:${NC}"
+    echo "$order_response" | jq '{order_id, status, created_by, authenticated_votes}'
 else
     echo -e "${YELLOW}⚠️  Order creation response:${NC}"
     echo "$order_response" | jq .
@@ -99,10 +110,10 @@ sleep 3
 echo "Checking cluster status with 2/3 nodes..."
 status_2of3=$(curl -s http://localhost:8102/consensus/status || echo "ERROR")
 if [[ "$status_2of3" != "ERROR" ]]; then
-    active_2of3=$(echo "$status_2of3" | jq -r '.active_nodes')
-    healthy_2of3=$(echo "$status_2of3" | jq -r '.cluster_healthy')
-    echo -e "  Active nodes: $active_2of3"
-    echo -e "  Cluster healthy: $healthy_2of3"
+    healthy_2of3=$(echo "$status_2of3" | jq -r '.healthy_nodes')
+    quorum_2of3=$(echo "$status_2of3" | jq -r '.quorum_available')
+    echo -e "  Healthy nodes: $healthy_2of3"
+    echo -e "  Quorum available: $quorum_2of3"
 fi
 echo ""
 
@@ -117,11 +128,16 @@ order_response2=$(curl -s -X POST http://localhost:8080/proxy/order-service/api/
     }' || echo "ERROR")
 
 if echo "$order_response2" | jq -e '.order_id' > /dev/null 2>&1; then
+    order_id2=$(echo "$order_response2" | jq -r '.order_id')
+    votes=$(echo "$order_response2" | jq -r '.authenticated_votes // "N/A"')
     echo -e "${GREEN}✅ Order created with 2/3 quorum!${NC}"
     echo -e "${GREEN}🛡️  Byzantine fault tolerance WORKING!${NC}"
-    echo "$order_response2" | jq '{order_id, status, consensus_achieved, nodes_agreed}'
+    echo "$order_response2" | jq '{order_id, status, created_by, authenticated_votes}'
 else
+    error_msg=$(echo "$order_response2" | jq -r '.error // "Unknown error"')
     echo -e "${RED}❌ Order creation failed with 2/3 quorum:${NC}"
+    echo "  Error: $error_msg"
+    echo "  This might indicate a BFT configuration issue"
     echo "$order_response2" | jq .
 fi
 echo ""
@@ -145,7 +161,12 @@ order_response3=$(curl -s -X POST http://localhost:8102/api/orders \
 if echo "$order_response3" | jq -e '.error' > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Order correctly REJECTED (quorum not met)!${NC}"
     echo -e "${GREEN}🛡️  BFT safety mechanism WORKING!${NC}"
-    echo "$order_response3" | jq '{error, quorum_status}'
+    error_msg=$(echo "$order_response3" | jq -r '.error')
+    reason=$(echo "$order_response3" | jq -r '.reason // "N/A"')
+    echo "  Error: $error_msg"
+    if [[ "$reason" != "N/A" ]]; then
+        echo "  Reason: $reason"
+    fi
 else
     echo -e "${YELLOW}⚠️  Unexpected response (should fail without quorum):${NC}"
     echo "$order_response3" | jq .
@@ -170,8 +191,9 @@ echo "Verifying all nodes are healthy..."
 for port in 8102 8112 8122; do
     health=$(curl -s http://localhost:$port/health || echo "ERROR")
     if [[ "$health" != "ERROR" ]]; then
-        node_id=$(echo "$health" | jq -r '.node_id')
-        echo -e "  ${GREEN}✅ Node $node_id is healthy (port $port)${NC}"
+        node=$(echo "$health" | jq -r '.node // "unknown"')
+        status=$(echo "$health" | jq -r '.status')
+        echo -e "  ${GREEN}✅ Node $node is $status (port $port)${NC}"
     else
         echo -e "  ${RED}❌ Node on port $port is not responding${NC}"
     fi
@@ -181,17 +203,22 @@ echo ""
 # Test 8: Final consensus test
 echo "Test 8: Final test with restored cluster (3/3)..."
 final_status=$(curl -s http://localhost:8102/consensus/status)
-final_active=$(echo "$final_status" | jq -r '.active_nodes')
-final_healthy=$(echo "$final_status" | jq -r '.cluster_healthy')
+final_healthy=$(echo "$final_status" | jq -r '.healthy_nodes')
+final_quorum=$(echo "$final_status" | jq -r '.quorum_available')
 
 echo "Cluster status:"
-echo "  - Active nodes: $final_active"
-echo "  - Cluster healthy: $final_healthy"
+echo "  - Healthy nodes: $final_healthy"
+echo "  - Quorum available: $final_quorum"
 
-if [[ "$final_active" == "3" ]] && [[ "$final_healthy" == "true" ]]; then
+if [[ "$final_healthy" == "3" ]] && [[ "$final_quorum" == "true" ]]; then
     echo -e "${GREEN}🎉 Cluster fully restored!${NC}"
 else
-    echo -e "${YELLOW}⚠️  Cluster still recovering (active: $final_active)${NC}"
+    echo -e "${YELLOW}⚠️  Cluster still recovering (healthy: $final_healthy, quorum: $final_quorum)${NC}"
+    echo "  Waiting 5 more seconds..."
+    sleep 5
+    final_status2=$(curl -s http://localhost:8102/consensus/status)
+    final_healthy2=$(echo "$final_status2" | jq -r '.healthy_nodes')
+    echo "  Updated healthy nodes: $final_healthy2"
 fi
 echo ""
 
@@ -201,9 +228,17 @@ echo "============================================"
 echo ""
 echo -e "${BLUE}📊 Test Results:${NC}"
 echo -e "  ${GREEN}✅ 3/3 consensus (full cluster)${NC}"
-echo -e "  ${GREEN}✅ 2/3 consensus (Byzantine fault tolerance)${NC}"
+if echo "$order_response2" | jq -e '.order_id' > /dev/null 2>&1; then
+    echo -e "  ${GREEN}✅ 2/3 consensus (Byzantine fault tolerance)${NC}"
+else
+    echo -e "  ${YELLOW}⚠️  2/3 consensus (needs verification)${NC}"
+fi
 echo -e "  ${GREEN}✅ 1/3 rejection (quorum safety)${NC}"
-echo -e "  ${GREEN}✅ Load balancing (round-robin)${NC}"
+if [[ $total_nodes -ge 2 ]]; then
+    echo -e "  ${GREEN}✅ Load balancing (round-robin)${NC}"
+else
+    echo -e "  ${YELLOW}⚠️  Load balancing (limited distribution)${NC}"
+fi
 echo -e "  ${GREEN}✅ Cluster recovery${NC}"
 echo ""
 echo -e "${BLUE}🛡️  BFT Features Verified:${NC}"
