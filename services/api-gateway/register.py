@@ -33,14 +33,13 @@ def register_service():
     for attempt in range(max_retries):
         try:
             ip = get_container_ip()
-            service_url = f"http://{SERVICE_NAME}:{SERVICE_PORT}"
             
             payload = {
                 'name': SERVICE_NAME,
-                'url': service_url,
-                'health_endpoint': '/health',
+                'port': int(SERVICE_PORT),
                 'metadata': {
                     'type': 'gateway',
+                    'protocol': 'http',
                     'rate_limiting': True,
                     'ddos_protection': True,
                     'ip': ip
@@ -54,25 +53,34 @@ def register_service():
             )
             
             if response.status_code in [200, 201]:
-                logger.info(f"Successfully registered {SERVICE_NAME}")
+                logger.info(f"✅ Successfully registered {SERVICE_NAME} at port {SERVICE_PORT}")
                 break
             else:
-                logger.warning(f"Registration attempt {attempt + 1} failed: {response.status_code}")
+                logger.warning(f"⚠️  Registration attempt {attempt + 1} failed: {response.status_code}")
+                if hasattr(response, 'text'):
+                    logger.warning(f"Response: {response.text}")
         
         except Exception as e:
-            logger.error(f"Registration attempt {attempt + 1} failed: {e}")
+            logger.error(f"❌ Registration attempt {attempt + 1} failed: {e}")
         
         if attempt < max_retries - 1:
+            logger.info(f"Retrying in {retry_delay} seconds...")
             time.sleep(retry_delay)
     
     # Send periodic heartbeats
+    logger.info("💓 Starting heartbeat thread...")
     while True:
         try:
-            requests.post(
+            response = requests.post(
                 f"{REGISTRY_URL}/heartbeat/{SERVICE_NAME}",
                 timeout=5
             )
+            if response.status_code == 200:
+                logger.debug(f"💓 Heartbeat sent successfully")
         except Exception as e:
-            logger.error(f"Failed to send heartbeat: {e}")
+            logger.warning(f"⚠️  Failed to send heartbeat: {e}")
         
         time.sleep(HEARTBEAT_INTERVAL)
+
+if __name__ == "__main__":
+    register_service()
